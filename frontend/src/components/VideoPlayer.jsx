@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
-import 'videojs-contrib-quality-levels';
-import 'videojs-hls-quality-selector';
+// Initialize plugins once globally (prevents re-registration warnings)
+import '../utils/videojs-plugins';
 import { AlertCircle } from 'lucide-react';
 import VideoDiagnostic from './VideoDiagnostic';
 
@@ -93,12 +93,6 @@ const videoPlayerStyles = `
     background: rgba(255,255,255,0.4);
     border-radius: 2px;
   }
-  /* Time display */
-  .video-js .vjs-time-control {
-    font-size: 13px;
-    line-height: 48px;
-    min-width: 50px;
-  }
   /* Volume control */
   .video-js .vjs-volume-control {
     margin: 0 8px;
@@ -119,17 +113,6 @@ const videoPlayerStyles = `
   /* Closed Captions button - right side */
   .video-js .vjs-subs-caps-button {
     order: 3;
-  }
-  /* Settings/Playback Rate button - YouTube style, right side */
-  .video-js .vjs-playback-rate {
-    order: 3;
-  }
-  .video-js .vjs-playback-rate .vjs-menu-button {
-    font-size: 13px;
-    font-weight: 500;
-  }
-  .video-js .vjs-playback-rate .vjs-menu-button-label {
-    padding: 0 4px;
   }
   /* Fullscreen button - right side */
   .video-js .vjs-fullscreen-control {
@@ -159,27 +142,6 @@ const videoPlayerStyles = `
     display: flex !important;
     visibility: visible !important;
   }
-  /* Current time - third */
-  .video-js .vjs-control-bar > .vjs-current-time {
-    order: 3;
-    margin-right: 4px;
-    display: flex !important;
-    visibility: visible !important;
-  }
-  /* Time divider "/" - fourth */
-  .video-js .vjs-control-bar > .vjs-time-divider {
-    order: 4;
-    margin: 0 4px;
-    display: flex !important;
-    visibility: visible !important;
-  }
-  /* Duration - fifth */
-  .video-js .vjs-control-bar > .vjs-duration {
-    order: 5;
-    margin-left: 4px;
-    display: flex !important;
-    visibility: visible !important;
-  }
   /* Progress bar is positioned absolutely at top, not in flex order */
   .video-js .vjs-control-bar > .vjs-progress-control {
     order: 0;
@@ -196,39 +158,6 @@ const videoPlayerStyles = `
     order: 2;
     flex: 1 1 auto;
     min-width: 0;
-  }
-  /* Control bar - right side controls */
-  /* Show playback rate button - make it visible and functional */
-  .video-js .vjs-control-bar > .vjs-playback-rate {
-    order: 6;
-    margin-left: 8px;
-    display: flex !important; /* Always visible */
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    cursor: pointer !important;
-    position: relative;
-  }
-  /* Display selected speed below button */
-  .video-js .vjs-control-bar > .vjs-playback-rate::after {
-    content: attr(data-selected-speed);
-    position: absolute;
-    bottom: -18px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.85);
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0.9;
-    font-weight: 500;
-  }
-  /* When menu is open, make it more prominent */
-  .video-js .vjs-control-bar > .vjs-playback-rate.vjs-menu-button-open {
-    z-index: 1000;
-  }
-  .video-js .vjs-control-bar > .vjs-playback-rate.vjs-menu-button-open .vjs-menu {
-    z-index: 1001;
   }
   /* Hide captions button completely */
   .video-js .vjs-control-bar > .vjs-subs-caps-button {
@@ -283,34 +212,6 @@ const videoPlayerStyles = `
   .video-js .vjs-volume-panel .vjs-volume-control {
     width: 80px;
     margin-right: 8px;
-  }
-  /* Time display styling */
-  .video-js .vjs-current-time,
-  .video-js .vjs-duration {
-    font-size: 13px;
-    font-weight: 500;
-    color: #fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-  }
-  .video-js .vjs-time-divider {
-    font-size: 13px;
-    color: #fff;
-    margin: 0 4px;
-  }
-  /* Hide scrollbar in playback rate menu - clean UI */
-  .video-js .vjs-playback-rate .vjs-menu {
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE and Edge */
-  }
-  .video-js .vjs-playback-rate .vjs-menu::-webkit-scrollbar {
-    display: none; /* Chrome, Safari, Opera */
-  }
-  .video-js .vjs-playback-rate .vjs-menu-content {
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE and Edge */
-  }
-  .video-js .vjs-playback-rate .vjs-menu-content::-webkit-scrollbar {
-    display: none; /* Chrome, Safari, Opera */
   }
   /* Hide scrollbar in all Video.js menus */
   .video-js .vjs-menu {
@@ -516,24 +417,21 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
       controls: true,
       preload: 'auto',
       autoplay: autoplay,
-      playbackRates: [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], // More playback speed options
       liveui: true, // Enable live UI for live streams
       // YouTube-like control bar layout - properly arranged controls
       controlBar: {
         children: [
           'playToggle', // Play/Pause button (automatically toggles)
           'volumePanel', // Volume control
-          'currentTimeDisplay', // Current time
-          'timeDivider', // Time separator "/"
-          'durationDisplay', // Total duration
           'progressControl', // Progress bar
           'liveDisplay',
           'remainingTimeDisplay',
           'spacer', // Flexible spacer to push controls to right
-          'playbackRateMenuButton', // Playback speed (hidden by default, shown when clicked)
           'pictureInPictureToggle', // Picture-in-Picture
           'fullscreenToggle' // Fullscreen
           // Removed: 'subsCapsButton' (Closed Captions - not needed)
+          // Removed: 'currentTimeDisplay', 'timeDivider', 'durationDisplay' (Time display)
+          // Removed: 'playbackRateMenuButton' (Playback speed)
         ]
       },
       html5: {
@@ -705,226 +603,6 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
           });
         }
 
-        // Add playback rate button dynamically - show it and make it functional
-        const playbackRateBtn = controlBar.getChild('playbackRateMenuButton');
-        if (playbackRateBtn) {
-          // Show the button (it will be visible)
-          playbackRateBtn.show();
-          
-          // Ensure it's clickable and functional
-          const playbackRateEl = playbackRateBtn.el();
-          if (playbackRateEl) {
-            playbackRateEl.style.pointerEvents = 'auto';
-            playbackRateEl.style.cursor = 'pointer';
-            playbackRateEl.style.display = 'flex';
-            playbackRateEl.style.visibility = 'visible';
-            
-            // Get all control bar children to hide/show them
-            const allControls = [
-              controlBar.getChild('playToggle'),
-              controlBar.getChild('volumePanel'),
-              controlBar.getChild('currentTimeDisplay'),
-              controlBar.getChild('timeDivider'),
-              controlBar.getChild('durationDisplay'),
-              controlBar.getChild('progressControl'),
-              controlBar.getChild('liveDisplay'),
-              controlBar.getChild('remainingTimeDisplay'),
-              controlBar.getChild('pictureInPictureToggle'),
-              controlBar.getChild('fullscreenToggle')
-            ].filter(Boolean); // Remove null/undefined
-            
-            // Function to hide all controls except speed button
-            const hideAllControls = () => {
-              console.log('[Speed Button] hideAllControls called, hiding', allControls.length, 'controls');
-              let hiddenCount = 0;
-              allControls.forEach((control, index) => {
-                if (control) {
-                  try {
-                    control.hide();
-                    hiddenCount++;
-                    const controlEl = control.el();
-                    if (controlEl) {
-                      controlEl.style.display = 'none';
-                      controlEl.style.visibility = 'hidden';
-                    }
-                  } catch (err) {
-                    console.error('[Speed Button] Error hiding control', index, err);
-                  }
-                }
-              });
-              console.log('[Speed Button] Hidden', hiddenCount, 'controls');
-            };
-            
-            // Function to show all controls
-            const showAllControls = () => {
-              console.log('[Speed Button] showAllControls called, showing', allControls.length, 'controls');
-              let shownCount = 0;
-              allControls.forEach((control, index) => {
-                if (control) {
-                  try {
-                    control.show();
-                    shownCount++;
-                    const controlEl = control.el();
-                    if (controlEl) {
-                      controlEl.style.display = '';
-                      controlEl.style.visibility = '';
-                    }
-                  } catch (err) {
-                    console.error('[Speed Button] Error showing control', index, err);
-                  }
-                }
-              });
-              console.log('[Speed Button] Shown', shownCount, 'controls');
-            };
-            
-            // Update selected speed display
-            const updateSpeedDisplay = (speed) => {
-              const speedText = speed === 1 ? '1x' : `${speed}x`;
-              playbackRateEl.setAttribute('data-selected-speed', speedText);
-            };
-            
-            // Initialize with current playback rate
-            updateSpeedDisplay(player.playbackRate());
-            
-            // Listen for playback rate changes
-            player.on('ratechange', () => {
-              updateSpeedDisplay(player.playbackRate());
-            });
-            
-            // Diagnostic logging
-            console.log('[Speed Button] Initializing speed button controls');
-            console.log('[Speed Button] Found controls:', allControls.length);
-            console.log('[Speed Button] Playback rate button:', playbackRateBtn);
-            
-            // Use MutationObserver to watch for class changes on the button
-            const observer = new MutationObserver((mutations) => {
-              mutations.forEach((mutation) => {
-                if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-                  const isMenuOpen = playbackRateEl.classList.contains('vjs-menu-button-open');
-                  console.log('[Speed Button] Menu state changed:', isMenuOpen ? 'OPEN' : 'CLOSED');
-                  
-                  if (isMenuOpen) {
-                    console.log('[Speed Button] Hiding all controls');
-                    hideAllControls();
-                  } else {
-                    console.log('[Speed Button] Showing all controls');
-                    showAllControls();
-                    updateSpeedDisplay(player.playbackRate());
-                  }
-                }
-              });
-            });
-            
-            // Start observing the button element for class changes
-            observer.observe(playbackRateEl, {
-              attributes: true,
-              attributeFilter: ['class']
-            });
-            
-            // Ensure menu works
-            const menu = playbackRateBtn.getChild('menu');
-            if (menu) {
-              console.log('[Speed Button] Menu found:', menu);
-              
-              // When menu opens, hide all other controls
-              menu.on('show', () => {
-                console.log('[Speed Button] Menu show event fired');
-                playbackRateBtn.show();
-                hideAllControls();
-              });
-              
-              // When menu closes, show all controls again
-              menu.on('hide', () => {
-                console.log('[Speed Button] Menu hide event fired');
-                showAllControls();
-                updateSpeedDisplay(player.playbackRate());
-              });
-              
-              // Listen for speed selection
-              menu.on('change', () => {
-                console.log('[Speed Button] Menu change event fired');
-                setTimeout(() => {
-                  showAllControls();
-                  updateSpeedDisplay(player.playbackRate());
-                }, 100);
-              });
-              
-              // Listen to menu items being clicked
-              const menuContent = menu.getChild('menuContent');
-              if (menuContent) {
-                console.log('[Speed Button] Menu content found');
-                menuContent.on('click', (e) => {
-                  console.log('[Speed Button] Menu item clicked');
-                  setTimeout(() => {
-                    showAllControls();
-                    updateSpeedDisplay(player.playbackRate());
-                  }, 100);
-                });
-              } else {
-                console.warn('[Speed Button] Menu content not found');
-              }
-            } else {
-              console.warn('[Speed Button] Menu not found');
-            }
-            
-            // Also listen to button click to handle menu toggle
-            playbackRateBtn.on('click', () => {
-              console.log('[Speed Button] Button clicked');
-              // Use a small delay to let Video.js update the class
-              setTimeout(() => {
-                const isMenuOpen = playbackRateEl.classList.contains('vjs-menu-button-open');
-                console.log('[Speed Button] Menu open state after click:', isMenuOpen);
-                if (isMenuOpen) {
-                  hideAllControls();
-                } else {
-                  showAllControls();
-                }
-              }, 100);
-            });
-            
-            // Listen for clicks outside to close menu and show controls
-            const handleDocumentClick = (e) => {
-              if (playbackRateEl && !playbackRateEl.contains(e.target)) {
-                const isMenuOpen = playbackRateEl.classList.contains('vjs-menu-button-open');
-                if (isMenuOpen) {
-                  console.log('[Speed Button] Click outside detected, menu will close');
-                  setTimeout(() => {
-                    showAllControls();
-                  }, 100);
-                }
-              }
-            };
-            document.addEventListener('click', handleDocumentClick);
-            
-            // Cleanup on player dispose
-            player.on('dispose', () => {
-              console.log('[Speed Button] Cleaning up');
-              observer.disconnect();
-              document.removeEventListener('click', handleDocumentClick);
-            });
-            
-            // Also listen for rate changes to update display
-            player.on('ratechange', () => {
-              console.log('[Speed Button] Rate changed to:', player.playbackRate());
-              updateSpeedDisplay(player.playbackRate());
-            });
-          }
-        } else {
-          // If button doesn't exist, create it dynamically
-          try {
-            const PlaybackRateMenuButton = videojs.getComponent('PlaybackRateMenuButton');
-            if (PlaybackRateMenuButton) {
-              const newPlaybackRateBtn = new PlaybackRateMenuButton(player, {
-                playbackRates: [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
-              });
-              controlBar.addChild(newPlaybackRateBtn, {}, 6); // Add at position 6
-              newPlaybackRateBtn.show();
-            }
-          } catch (err) {
-            console.warn('Could not add playback rate button dynamically:', err);
-          }
-        }
-
         // Remove captions button completely (not in controlBar children anymore)
         const captionsBtn = controlBar.getChild('subsCapsButton');
         if (captionsBtn) {
@@ -953,14 +631,6 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
         if (fullscreenBtn) {
           fullscreenBtn.show();
         }
-
-        // Ensure time displays are visible
-        const currentTime = controlBar.getChild('currentTimeDisplay');
-        const duration = controlBar.getChild('durationDisplay');
-        const timeDivider = controlBar.getChild('timeDivider');
-        if (currentTime) currentTime.show();
-        if (duration) duration.show();
-        if (timeDivider) timeDivider.show();
 
         // Ensure volume panel is visible and working
         const volumePanel = controlBar.getChild('volumePanel');

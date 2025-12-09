@@ -99,6 +99,7 @@ router.get('/qr-codes', (req, res, next) => {
   next();
 }, authenticateToken, videoController.getAllQRCodes);
 router.get('/thumbnails', authenticateToken, thumbnailController.getThumbnails);
+router.get('/export-csv', authenticateToken, videoController.generateVideosCSV);
 
 // QR code download route - MUST be before other /:videoId/* routes
 router.get('/:videoId/qr-download', (req, res, next) => {

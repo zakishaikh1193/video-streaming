@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import pool from '../config/database.js';
 import config from '../config/config.js';
 import * as videoService from '../services/videoService.js';
@@ -9,6 +10,54 @@ import * as redirectService from '../services/redirectService.js';
 import * as qrCodeService from '../services/qrCodeService.js';
 import { ensureDirectoryExists, getFileSize } from '../utils/fileUtils.js';
 import { getBaseUrl } from '../utils/urlHelper.js';
+
+// Self-contained generateUniqueShortId function - no external module imports needed
+// This completely avoids any module loading issues
+async function generateUniqueShortId(maxRetries = 10) {
+  // Helper to generate a short ID
+  const generateShortId = () => {
+    const randomBytes = crypto.randomBytes(6);
+    const base36 = randomBytes.toString('base64')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .substring(0, 6)
+      .toLowerCase();
+    const timestamp = Date.now().toString(36).slice(-4);
+    return (base36 + timestamp).substring(0, 10);
+  };
+  
+  // Try to generate a unique ID by checking database
+  for (let i = 0; i < maxRetries; i++) {
+    const shortId = generateShortId();
+    
+    try {
+      // Check if this ID already exists in redirects table
+      const [existing] = await pool.execute(
+        'SELECT id FROM redirects WHERE slug = ?',
+        [shortId]
+      );
+      
+      if (existing.length === 0) {
+        // Also check videos table for video_id
+        const [videoExists] = await pool.execute(
+          'SELECT id FROM videos WHERE video_id = ?',
+          [shortId]
+        );
+        
+        if (videoExists.length === 0) {
+          return shortId;
+        }
+      }
+    } catch (error) {
+      // If database error, try again
+      console.warn('[VideoController] Error checking short ID uniqueness:', error.message);
+    }
+  }
+  
+  // If all retries failed, use timestamp-based ID with random suffix
+  const timestamp = Date.now().toString(36).slice(-6);
+  const random = crypto.randomBytes(2).toString('hex').substring(0, 4);
+  return (timestamp + random).substring(0, 10);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -304,9 +353,8 @@ export async function getVideo(req, res) {
 
 export async function uploadVideo(req, res) {
   try {
-    // Handle multer fields (video and thumbnail)
+    // Handle multer fields (video only - no thumbnail)
     const videoFile = req.files?.video?.[0] || req.files?.video || req.file || null;
-    const thumbnailFile = req.files?.thumbnail?.[0] || req.files?.thumbnail || null;
 
     if (!videoFile) {
       return res.status(400).json({ error: 'Video file is required' });
@@ -325,28 +373,22 @@ export async function uploadVideo(req, res) {
       topic,
       title,
       description,
-      language = 'en'
+      language = 'en',
+      videoId: requestedVideoId,
+      plannedPath
     } = req.body;
 
-    // Generate video ID
-    const { generateVideoId } = await import('../utils/videoIdGenerator.js');
-    const { generateUniqueShortId } = await import('../utils/shortUrlGenerator.js');
-    
-    let videoId = generateVideoId({
-      course,
-      grade,
-      lesson,
-      module,
-      activity,
-      topic,
-      title
-    });
+    // Generate video ID (ONLY from provided ID or random; do not derive from grade/lesson)
+    const makeFallbackId = () => `VID_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    let baseVideoId = (requestedVideoId && requestedVideoId.trim()) || makeFallbackId();
 
     // Ensure video ID is unique
+    let videoId = baseVideoId;
     let existingVideo = await videoService.getVideoByVideoId(videoId);
     let counter = 1;
     while (existingVideo) {
-      videoId = `${videoId}_${counter}`;
+      const suffix = `${counter}_${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
+      videoId = `${baseVideoId}_${suffix}`;
       existingVideo = await videoService.getVideoByVideoId(videoId);
       counter++;
     }
@@ -354,8 +396,16 @@ export async function uploadVideo(req, res) {
     console.log(`[Upload Video] Generated video ID: ${videoId}`);
 
     // Generate redirect slug (short URL)
-    const redirectSlug = await generateUniqueShortId();
-    console.log(`[Upload Video] Generated redirect slug: ${redirectSlug}`);
+    let redirectSlug;
+    try {
+      redirectSlug = await generateUniqueShortId();
+      console.log(`[Upload Video] Generated redirect slug: ${redirectSlug}`);
+    } catch (slugError) {
+      console.error('[Upload Video] Error generating redirect slug:', slugError);
+      // Fallback: use videoId as slug if generateUniqueShortId fails
+      redirectSlug = videoId.substring(0, 10);
+      console.warn(`[Upload Video] Using fallback redirect slug: ${redirectSlug}`);
+    }
 
     // Create upload directory (backend/upload)
     const uploadDir = path.join(__dirname, '../upload');
@@ -408,18 +458,7 @@ export async function uploadVideo(req, res) {
       // Continue without QR code
     }
 
-    // Handle thumbnail if provided
-    let thumbnailUrl = null;
-    if (thumbnailFile) {
-      try {
-        const { saveUploadedThumbnail } = await import('../services/thumbnailService.js');
-        thumbnailUrl = await saveUploadedThumbnail(thumbnailFile, videoId);
-        console.log(`[Upload Video] ✓ Thumbnail saved: ${thumbnailUrl}`);
-      } catch (thumbError) {
-        console.warn(`[Upload Video] ⚠ Could not save thumbnail:`, thumbError.message);
-        // Continue without thumbnail
-      }
-    }
+    // No thumbnail handling - removed per user request
 
     // Build streaming URL - detect protocol from request if behind proxy
     const baseUrl = getBaseUrl(req);
@@ -427,8 +466,8 @@ export async function uploadVideo(req, res) {
     console.log(`[Upload Video] Base URL: ${baseUrl}`);
     console.log(`[Upload Video] Streaming URL: ${streamingUrl}`);
 
-    // Create video record in database
-    const videoData = {
+    // Create video record in database (with retry on duplicate video_id)
+    let videoData = {
       videoId,
       title: title || videoId,
       description: description || '',
@@ -442,14 +481,38 @@ export async function uploadVideo(req, res) {
       filePath: relativePath, // Relative path: upload/filename.mp4
       streamingUrl,
       qrUrl,
-      thumbnailUrl,
       redirectSlug,
       size: fileSize,
       status: 'active'
     };
 
     console.log(`[Upload Video] Creating video record in database...`);
-    const insertId = await videoService.createVideo(videoData);
+    let insertId;
+    try {
+      insertId = await videoService.createVideo(videoData);
+    } catch (err) {
+      if (err.code === 'ER_DUP_ENTRY') {
+        console.warn('[Upload Video] Duplicate video_id detected, regenerating ID and retrying...');
+        const newId = `${videoData.videoId}_${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
+        videoData.videoId = newId;
+        videoId = newId;
+        let newRedirectSlug;
+        try {
+          newRedirectSlug = await generateUniqueShortId();
+        } catch (slugError) {
+          console.warn('[Upload Video] Error generating new redirect slug, using fallback:', slugError);
+          newRedirectSlug = newId.substring(0, 10);
+        }
+        videoData.redirectSlug = newRedirectSlug;
+        redirectSlug = newRedirectSlug;
+        // Update streaming URL with new redirect slug
+        videoData.streamingUrl = `${getBaseUrl(req)}/api/s/${newRedirectSlug}`;
+        insertId = await videoService.createVideo(videoData);
+        console.log(`[Upload Video] ✓ Retried and created video with new ID: ${newId}`);
+      } else {
+        throw err;
+      }
+    }
     console.log(`[Upload Video] ✓ Video record created: ID ${insertId}`);
     
     // Fetch the created video to get all fields
@@ -495,10 +558,23 @@ export async function uploadVideo(req, res) {
       redirect_slug: redirectSlug
     });
   } catch (error) {
-    console.error('Upload video error:', error);
+    console.error('[Upload Video] ===== ERROR =====');
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error stack:', error.stack);
+    if (error.sqlMessage) {
+      console.error('SQL Message:', error.sqlMessage);
+      console.error('SQL State:', error.sqlState);
+      console.error('SQL Code:', error.sqlCode);
+    }
+    console.error('==============================');
+    
     res.status(500).json({ 
       error: 'Failed to upload video', 
       message: error.message,
+      code: error.code,
+      sqlMessage: error.sqlMessage,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
@@ -1067,5 +1143,93 @@ export async function getFilterValues(req, res) {
   } catch (error) {
     console.error('Get filter values error:', error);
     res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * Generate CSV from all videos in database
+ * Format: ID, Title, Link/Path, Grade, Lesson, Module, Activity
+ * No thumbnail column
+ */
+export async function generateVideosCSV(req, res) {
+  try {
+    // Get all active videos
+    const videos = await videoService.getAllVideos({ status: 'active' });
+    
+    if (videos.length === 0) {
+      return res.status(400).json({ error: 'No videos found to generate CSV' });
+    }
+
+    // CSV headers: ID, Title, Link/Path, Grade, Lesson, Module, Activity
+    const headers = ['ID', 'Title', 'Link/Path', 'Grade', 'Lesson', 'Module', 'Activity'];
+    
+    // Build rows from videos
+    const rows = videos.map(video => {
+      // ID - use video_id
+      const videoId = video.video_id || '';
+      
+      // Title
+      const title = video.title || video.video_id || 'Untitled';
+      
+      // Link/Path - use file_path (should be upload/filename.mp4)
+      let linkPath = video.file_path || '';
+      // If file_path is relative, keep it as-is; if absolute, extract relative part
+      if (linkPath && !linkPath.startsWith('upload/') && !linkPath.startsWith('my-storage/')) {
+        // Try to extract from absolute path
+        if (linkPath.includes('upload/')) {
+          linkPath = linkPath.substring(linkPath.indexOf('upload/'));
+        } else if (linkPath.includes('my-storage/')) {
+          linkPath = linkPath.substring(linkPath.indexOf('my-storage/'));
+        }
+      }
+      // If still no path, use streaming URL as fallback
+      if (!linkPath && video.streaming_url) {
+        linkPath = video.streaming_url;
+      }
+      
+      // Grade, Lesson, Module, Activity - get from video record
+      const grade = video.grade || '';
+      const lesson = video.lesson || '';
+      const module = video.module || '';
+      const activity = video.activity || '';
+      
+      return [
+        videoId,
+        title,
+        linkPath,
+        grade,
+        lesson,
+        module,
+        activity
+      ];
+    });
+
+    // Escape CSV values
+    const escapeCSV = (value) => {
+      const cellStr = String(value || '').trim();
+      if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n') || cellStr.includes('\r')) {
+        return `"${cellStr.replace(/"/g, '""')}"`;
+      }
+      return cellStr;
+    };
+
+    // Build CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(escapeCSV).join(','))
+    ].join('\r\n');
+
+    // Set response headers for CSV download
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="videos_export_${Date.now()}.csv"`);
+    
+    // Send CSV with BOM for Excel compatibility
+    res.send('\ufeff' + csvContent);
+  } catch (error) {
+    console.error('Generate videos CSV error:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate CSV', 
+      message: error.message 
+    });
   }
 }

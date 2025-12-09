@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -24,6 +24,24 @@ function AdminLogin() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Redirect to dashboard if already logged in
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      // Verify token is still valid
+      api.get('/auth/verify')
+        .then(() => {
+          const from = location.state?.from?.pathname || '/admin';
+          navigate(from, { replace: true });
+        })
+        .catch(() => {
+          // Token invalid, remove it
+          localStorage.removeItem('token');
+        });
+    }
+  }, [navigate, location]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -43,9 +61,10 @@ function AdminLogin() {
       localStorage.setItem('token', response.data.token);
       setSuccess(true);
       
-      // Navigate after showing success state
+      // Navigate to intended page or default to admin dashboard
+      const from = location.state?.from?.pathname || '/admin';
       setTimeout(() => {
-        navigate('/admin');
+        navigate(from, { replace: true });
       }, 800);
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed. Please check your credentials.');

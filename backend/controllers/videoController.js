@@ -448,26 +448,35 @@ export async function uploadVideo(req, res) {
       status: 'active'
     };
 
+    // Create video record and redirect in parallel (faster)
     console.log(`[Upload Video] Creating video record in database...`);
-    const insertId = await videoService.createVideo(videoData);
-    console.log(`[Upload Video] ✓ Video record created: ID ${insertId}`);
+    const [insertId, redirectResult] = await Promise.allSettled([
+      videoService.createVideo(videoData),
+      (async () => {
+        try {
+          const targetUrl = `${config.urls.frontend}/stream/${videoId}`;
+          await redirectService.createRedirect(redirectSlug, targetUrl, false);
+          console.log(`[Upload Video] ✓ Redirect created: ${redirectSlug} -> ${targetUrl}`);
+          return true;
+        } catch (redirectError) {
+          console.warn(`[Upload Video] ⚠ Could not create redirect:`, redirectError.message);
+          return false;
+        }
+      })()
+    ]);
+    
+    if (insertId.status === 'rejected') {
+      throw new Error(`Failed to create video record: ${insertId.reason.message}`);
+    }
+    
+    console.log(`[Upload Video] ✓ Video record created: ID ${insertId.value}`);
     
     // Fetch the created video to get all fields
-    const video = await videoService.getVideoById(insertId);
+    const video = await videoService.getVideoById(insertId.value);
     if (!video) {
       throw new Error('Video was created but could not be retrieved from database');
     }
     console.log(`[Upload Video] ✓ Video retrieved: ID ${video.id}, Video ID: ${video.video_id}`);
-
-    // Create redirect entry
-    try {
-      const targetUrl = `${config.urls.frontend}/stream/${videoId}`;
-      await redirectService.createRedirect(redirectSlug, targetUrl, false);
-      console.log(`[Upload Video] ✓ Redirect created: ${redirectSlug} -> ${targetUrl}`);
-    } catch (redirectError) {
-      console.warn(`[Upload Video] ⚠ Could not create redirect:`, redirectError.message);
-      // Continue - redirect might already exist
-    }
 
     console.log(`[Upload Video] ===== UPLOAD COMPLETE =====`);
     console.log(`[Upload Video] ✓ Video uploaded successfully`);

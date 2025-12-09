@@ -1,0 +1,47 @@
+# DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION BEGIN
+<IfModule Litespeed>
+</IfModule>
+# DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION END
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Internal rewrite: /s/:slug -> /api/s/:slug (for streaming routes)
+  # This allows /s/ routes to work without changing the URL
+  # Must come BEFORE the file/directory check
+  RewriteCond %{REQUEST_URI} ^/s/(.+)$
+  RewriteRule ^s/(.+)$ /api/s/$1 [L]
+
+  # Exclude API and uploads from rewrite (let backend handle these)
+  # Also exclude static asset directories
+  RewriteCond %{REQUEST_URI} ^/api/ [OR]
+  RewriteCond %{REQUEST_URI} ^/uploads/ [OR]
+  RewriteCond %{REQUEST_URI} ^/video-storage/ [OR]
+  RewriteCond %{REQUEST_URI} ^/qr-codes/ [OR]
+  RewriteCond %{REQUEST_URI} ^/thumbnails/ [OR]
+  RewriteCond %{REQUEST_URI} ^/assets/
+  RewriteRule ^ - [L]
+
+  # Don't rewrite requests for actual files or directories
+  # This includes static assets like .js, .css, .png, etc.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Rewrite everything else to index.html (for SPA routing)
+  # This handles all frontend routes like /video/:id, /admin/*, /stream/*, etc.
+  # The [L] flag stops processing further rules
+  # Make sure index.html exists before rewriting
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_URI} !^/index\.html$
+  RewriteRule ^(.*)$ /index.html [L]
+</IfModule>
+
+# Fallback for LiteSpeed if mod_rewrite is not available
+<IfModule !mod_rewrite.c>
+  <IfModule mod_alias.c>
+    RedirectMatch 404 /\.git
+  </IfModule>
+</IfModule>

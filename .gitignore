@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build outputs
+frontend/dist/
+frontend/build/
+backend/dist/
+
+# Video storage (keep structure, ignore files)
+video-storage/**/*.mp4
+video-storage/**/*.webm
+video-storage/**/*.mov
+video-storage/**/*.avi
+video-storage/**/*.mkv
+
+
+backend/upload/
+backend/upload/*
+backend/uploads/
+backend/uploads/*
+
+# QR codes
+qr-codes/*.png
+qr-codes/*.jpg
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+
+
+
+

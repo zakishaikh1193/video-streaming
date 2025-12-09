@@ -1,0 +1,36 @@
+# DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION BEGIN
+<IfModule Litespeed>
+</IfModule>
+# DO NOT REMOVE OR MODIFY. CLOUDLINUX ENV VARS CONFIGURATION END
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Internal rewrite: /s/:slug -> /api/s/:slug (for streaming routes)
+  # This allows /s/ routes to work without changing the URL
+  RewriteCond %{REQUEST_URI} ^/s/(.+)$
+  RewriteRule ^s/(.+)$ /api/s/$1 [L]
+
+  # Exclude API and backend paths from rewrite
+  RewriteCond %{REQUEST_URI} ^/api/ [OR]
+  RewriteCond %{REQUEST_URI} ^/uploads/ [OR]
+  RewriteCond %{REQUEST_URI} ^/video-storage/ [OR]
+  RewriteCond %{REQUEST_URI} ^/qr-codes/ [OR]
+  RewriteCond %{REQUEST_URI} ^/thumbnails/ [OR]
+  RewriteCond %{REQUEST_URI} ^/assets/
+  RewriteRule ^ - [L]
+
+  # Don't rewrite if the requested file or directory exists
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Rewrite all other requests to index.html for SPA routing
+  # This handles: /admin, /admin/*, /video/*, /stream/*, etc.
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_URI} !^/index\.html$
+  RewriteRule ^(.*)$ /index.html [L]
+</IfModule>
+

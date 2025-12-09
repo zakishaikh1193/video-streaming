@@ -344,7 +344,29 @@ export async function getVideo(req, res) {
     if (!video) {
       return res.status(404).json({ error: 'Video not found' });
     }
-    res.json(video);
+    
+    // Ensure all fields are properly returned, including module
+    // Log to verify module is in the response
+    console.log(`[Get Video] Video ID: ${videoId}`);
+    console.log(`[Get Video] Module field value:`, video.module);
+    console.log(`[Get Video] Module field type:`, typeof video.module);
+    console.log(`[Get Video] Module field truthy:`, !!video.module);
+    console.log(`[Get Video] All video fields:`, Object.keys(video));
+    console.log(`[Get Video] Raw video object:`, JSON.stringify(video, null, 2));
+    
+    // Explicitly ensure module is included in response (preserve all values including empty strings and 0)
+    const response = {
+      ...video,
+      // Preserve module value exactly as it is (including empty strings, 0, etc.)
+      module: video.hasOwnProperty('module') ? video.module : null,
+      activity: video.hasOwnProperty('activity') ? video.activity : null,
+      course: video.hasOwnProperty('course') ? video.course : null,
+      grade: video.hasOwnProperty('grade') ? video.grade : null,
+      lesson: video.hasOwnProperty('lesson') ? video.lesson : null
+    };
+    
+    console.log(`[Get Video] Response module field:`, response.module);
+    res.json(response);
   } catch (error) {
     console.error('Get video error:', error);
     res.status(500).json({ error: error.message });
@@ -378,19 +400,50 @@ export async function uploadVideo(req, res) {
       plannedPath
     } = req.body;
 
-    // Generate video ID (ONLY from provided ID or random; do not derive from grade/lesson)
-    const makeFallbackId = () => `VID_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    let baseVideoId = (requestedVideoId && requestedVideoId.trim()) || makeFallbackId();
+    // Check for duplicate title - prevent upload if title already exists
+    if (title && title.trim() !== '') {
+      const existingVideoByTitle = await videoService.getVideoByTitle(title.trim());
+      if (existingVideoByTitle) {
+        console.log(`[Upload Video] Duplicate title detected: "${title}"`);
+        return res.status(409).json({ 
+          error: 'Duplicate video title',
+          message: `A video with the title "${title}" already exists. Please use a different title.`,
+          existingVideoId: existingVideoByTitle.video_id
+        });
+      }
+    }
 
-    // Ensure video ID is unique
+    // Generate video ID (ONLY from provided ID or random; do not derive from grade/lesson)
+    const makeFallbackId = () => {
+      // Strong and short ID: timestamp (5 chars) + random (5 chars) = 10 chars total
+      const timestamp = Date.now().toString(36).slice(-5).toUpperCase();
+      const random = Math.random().toString(36).slice(2, 7).toUpperCase();
+      return `VID_${timestamp}${random}`;
+    };
+    
+    // Use provided Draft ID if available (it's strong and unique)
+    let baseVideoId = (requestedVideoId && requestedVideoId.trim()) || makeFallbackId();
     let videoId = baseVideoId;
+
+    // Check if the provided ID is strong (format: VID_XXXXXXXXXX where X is 10 alphanumeric chars)
+    const isStrongId = /^VID_[A-Z0-9]{10}$/.test(baseVideoId);
+    
+    // Ensure video ID is unique
     let existingVideo = await videoService.getVideoByVideoId(videoId);
     let counter = 1;
-    while (existingVideo) {
+    let maxRetries = isStrongId ? 20 : 10; // More retries for strong IDs since they should be unique
+    
+    while (existingVideo && counter <= maxRetries) {
+      // Add minimal suffix only if duplicate (very rare for strong IDs)
       const suffix = `${counter}_${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
       videoId = `${baseVideoId}_${suffix}`;
       existingVideo = await videoService.getVideoByVideoId(videoId);
       counter++;
+    }
+    
+    // If still duplicate after retries, log warning but continue
+    if (existingVideo) {
+      console.warn(`[Upload Video] Warning: Could not generate unique ID after ${maxRetries} retries. Using: ${videoId}`);
     }
 
     console.log(`[Upload Video] Generated video ID: ${videoId}`);

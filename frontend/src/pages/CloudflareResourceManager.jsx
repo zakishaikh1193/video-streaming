@@ -31,8 +31,38 @@ function MyStorageManager() {
     setErrorDetails(null);
     try {
       const response = await api.get('/videos?status=active');
-      setVideos(response.data || []);
-      if (response.data.length === 0) {
+      let videosData = response.data || [];
+      
+      // Filter out old videos with empty course, unit, and module (old structure)
+      videosData = videosData.filter(video => {
+        // Keep videos that have at least course, unit, or module, OR have a strong ID format
+        const hasStrongId = /^VID_[A-Z0-9]{10}$/.test(video.video_id);
+        const hasMetadata = video.course || video.unit || video.module || video.grade || video.lesson;
+        return hasStrongId || hasMetadata;
+      });
+      
+      // Detect duplicate titles
+      const titleCounts = {};
+      videosData.forEach(video => {
+        const title = (video.title || '').trim();
+        if (title) {
+          titleCounts[title] = (titleCounts[title] || 0) + 1;
+        }
+      });
+      
+      // Add duplicate status to videos
+      videosData = videosData.map(video => {
+        const title = (video.title || '').trim();
+        const isDuplicate = title && titleCounts[title] > 1;
+        return {
+          ...video,
+          isDuplicate,
+          duplicateCount: title ? titleCounts[title] : 0
+        };
+      });
+      
+      setVideos(videosData);
+      if (videosData.length === 0) {
         setError('No videos found. Upload some videos first.');
       }
     } catch (err) {
@@ -54,7 +84,11 @@ function MyStorageManager() {
     const makeDraftId = () => {
       let draft;
       do {
-        draft = `VID_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+        // Strong and short ID: timestamp (base36, 5 chars) + random (base36, 5 chars) = 10 chars total
+        // Format: VID_XXXXXXXXXX (short but strong)
+        const timestamp = Date.now().toString(36).slice(-5).toUpperCase();
+        const random = Math.random().toString(36).slice(2, 7).toUpperCase();
+        draft = `VID_${timestamp}${random}`;
       } while (existingIds.has(draft));
       existingIds.add(draft);
       return draft;
@@ -74,6 +108,7 @@ function MyStorageManager() {
         grade: '',
         lesson: '',
         unit: '',
+        course: '',
         module: '',
         description: ''
       };
@@ -122,7 +157,7 @@ function MyStorageManager() {
         formData.append('lesson', item.lesson || '');
         formData.append('module', item.module || '');
         formData.append('description', item.description || '');
-        formData.append('course', item.unit || ''); // use course field as unit fallback
+        formData.append('course', item.course || item.unit || ''); // use course field, fallback to unit
 
         try {
           await api.post('/videos/upload', formData, {
@@ -144,6 +179,7 @@ function MyStorageManager() {
             lesson: item.lesson || '',
             module: item.module || '',
             unit: item.unit || '',
+            course: item.course || '',
             description: item.description || '',
             error: {
               message: uploadErr.message || 'Unknown error',
@@ -300,8 +336,9 @@ function MyStorageManager() {
     setEditFormData({
       grade: video.grade || '',
       lesson: video.lesson || '',
+      course: video.course || '',
+      unit: video.unit || '',
       module: video.module || '',
-      activity: video.activity || '',
       title: video.title || '',
       description: video.description || ''
     });
@@ -365,14 +402,8 @@ function MyStorageManager() {
                     className="hidden"
                   />
                 </label>
+            
             <button
-                  onClick={() => navigate('/admin/upload')}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 font-semibold shadow-lg hover:shadow-xl hover:scale-[1.02]"
-                >
-                  <Plus className="w-5 h-5" />
-                  Single Upload Page
-                </button>
-                <button
                   onClick={loadVideos}
                   disabled={loading}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-lg hover:shadow-xl hover:scale-[1.02] font-semibold"
@@ -388,8 +419,8 @@ function MyStorageManager() {
         {error && (
           <div className="mb-6 space-y-4">
             <div className="p-5 bg-red-50 border-l-4 border-red-500 rounded-xl text-red-700 flex items-start gap-3 shadow-sm">
-              <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
+            <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
                 <div className="font-medium mb-2">{error}</div>
                 {errorDetails && (
                   <button
@@ -401,9 +432,9 @@ function MyStorageManager() {
                 )}
               </div>
               <button onClick={() => { setError(''); setErrorDetails(null); }} className="text-red-500 hover:text-red-700 transition-colors">
-                <XCircle className="w-5 h-5" />
-              </button>
-            </div>
+              <XCircle className="w-5 h-5" />
+            </button>
+          </div>
             
             {/* Detailed Diagnostics */}
             {errorDetails && errorDetails.expanded && (
@@ -411,7 +442,7 @@ function MyStorageManager() {
                 <div className="mb-4 pb-3 border-b border-slate-700">
                   <h4 className="text-lg font-bold text-red-400 mb-2">🔍 Upload Diagnostics</h4>
                   <div className="text-xs text-slate-400">Timestamp: {errorDetails.timestamp}</div>
-                </div>
+          </div>
                 
                 <div className="space-y-4">
                   {/* File Information */}
@@ -421,8 +452,8 @@ function MyStorageManager() {
                       <div>Name: <span className="text-white">{errorDetails.fileName}</span></div>
                       <div>Size: <span className="text-white">{formatFileSize(errorDetails.fileSize)} ({errorDetails.fileSize} bytes)</span></div>
                       <div>Type: <span className="text-white">{errorDetails.fileType}</span></div>
-                    </div>
-                  </div>
+              </div>
+            </div>
 
                   {/* Metadata Information */}
                   <div>
@@ -478,7 +509,7 @@ function MyStorageManager() {
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-3">
                 <div className="p-2 bg-emerald-100 rounded-xl">
                   <Upload className="w-5 h-5 text-emerald-600" />
-          </div>
+                  </div>
                 Staged Videos ({stagedFiles.length})
               </h3>
                 <div className="flex gap-2 flex-wrap">
@@ -510,15 +541,16 @@ function MyStorageManager() {
                   <button
                   onClick={() => {
                     // Generate CSV from staged files client-side
-                    const headers = ['ID', 'Title', 'Planned Path', 'Preview URL', 'Grade', 'Lesson', 'Unit', 'Module', 'Description'];
+                    const headers = ['ID', 'Title', 'Planned Path', 'Preview URL', 'Course', 'Grade', 'Unit', 'Lesson', 'Module', 'Description'];
                     const rows = stagedFiles.map((f) => [
                       f.videoId || '',
                       f.title || f.file.name.replace(/\.[^/.]+$/, ''),
                       f.plannedPath || '',
                       f.previewUrl || '',
+                      f.course || '',
                       f.grade || '',
-                      f.lesson || '',
                       f.unit || '',
+                      f.lesson || '',
                       f.module || '',
                       f.description || ''
                     ]);
@@ -557,9 +589,9 @@ function MyStorageManager() {
                     className="bg-gradient-to-r from-emerald-500 to-green-500 h-full rounded-full transition-all duration-300"
                     style={{ width: `${uploadProgress}%` }}
                   />
-                </div>
+                            </div>
                 <div className="text-sm text-slate-600 mt-2">Uploading... {uploadProgress}%</div>
-                    </div>
+                              </div>
             )}
 
             <div className="overflow-x-auto">
@@ -570,9 +602,10 @@ function MyStorageManager() {
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Title</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Planned URL</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Planned Path</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Course</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Grade</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Lesson</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Unit</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Lesson</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Module</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Description</th>
                     <th className="px-6 py-3 text-center text-xs font-semibold text-slate-700 uppercase tracking-wider">Actions</th>
@@ -584,7 +617,7 @@ function MyStorageManager() {
                       <td className="px-6 py-3">
                         <div className="text-xs font-mono text-slate-800 bg-slate-100 px-3 py-2 rounded-lg">
                           {item.videoId}
-                    </div>
+                            </div>
                       </td>
                       <td className="px-6 py-3">
                         <input
@@ -597,12 +630,21 @@ function MyStorageManager() {
                       <td className="px-6 py-3">
                         <div className="text-xs text-blue-700 font-mono bg-blue-50 px-3 py-2 rounded-lg break-all">
                           {item.previewUrl}
-                  </div>
+                          </div>
                       </td>
                       <td className="px-6 py-3">
                         <div className="text-xs text-slate-700 font-mono bg-slate-50 px-3 py-2 rounded-lg">
                           {item.plannedPath}
                 </div>
+                      </td>
+                      <td className="px-6 py-3">
+                        <input
+                          type="text"
+                          value={item.course || ''}
+                          onChange={(e) => updateStagedField(item.id, 'course', e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Course name"
+                        />
                       </td>
                       <td className="px-6 py-3">
                         <input
@@ -615,16 +657,16 @@ function MyStorageManager() {
                       <td className="px-6 py-3">
                         <input
                           type="text"
-                          value={item.lesson}
-                          onChange={(e) => updateStagedField(item.id, 'lesson', e.target.value)}
+                          value={item.unit}
+                          onChange={(e) => updateStagedField(item.id, 'unit', e.target.value)}
                           className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </td>
                       <td className="px-6 py-3">
                         <input
                           type="text"
-                          value={item.unit}
-                          onChange={(e) => updateStagedField(item.id, 'unit', e.target.value)}
+                          value={item.lesson}
+                          onChange={(e) => updateStagedField(item.id, 'lesson', e.target.value)}
                           className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </td>
@@ -697,16 +739,7 @@ function MyStorageManager() {
                     Delete ({selectedVideos.length})
                     </button>
                   )}
-                {videos.length > 0 && (
-                    <button
-                    onClick={generateCSV}
-                    disabled={loading}
-                    className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all duration-200 font-bold shadow-md hover:shadow-lg hover:scale-[1.02] disabled:bg-gray-400"
-                    >
-                      <FileText className="w-4 h-4" />
-                      Generate CSV
-                    </button>
-                  )}
+                
                 </div>
               </div>
             {videos.length > 0 && (
@@ -740,12 +773,7 @@ function MyStorageManager() {
                 <FileVideo className="w-16 h-16 text-slate-400 mx-auto mb-4" />
                 <div className="text-slate-600 font-semibold mb-2">No videos found</div>
                 <div className="text-slate-500 text-sm mb-4">Upload videos to see them here</div>
-                <button
-                  onClick={() => navigate('/admin/upload')}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-semibold"
-                >
-                  Upload Video
-                </button>
+                
                 </div>
               ) : (
                   <table className="min-w-full">
@@ -761,13 +789,14 @@ function MyStorageManager() {
                         </th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">ID</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Title</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Course</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Grade</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Unit</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Lesson</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Module</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Activity</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">File Path</th>
                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Size</th>
-                    <th className="px-6 py-4 text-center text-xs font-semibold text-slate-700 uppercase tracking-wider">Actions</th>
+                    <th className="px-6 py-4 text-center text-xs font-semibold text-slate-700 uppercase tracking-wider">Status</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-slate-200">
@@ -805,14 +834,38 @@ function MyStorageManager() {
                           {isEditing ? (
                             <input
                               type="text"
+                              value={editFormData.course || ''}
+                              onChange={(e) => setEditFormData({ ...editFormData, course: e.target.value })}
+                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          ) : (
+                            <div className="text-sm text-slate-700 font-semibold">{video.course || (video.course === null || video.course === undefined ? '-' : '')}</div>
+                          )}
+                        </td>
+                            <td className="px-6 py-4">
+                          {isEditing ? (
+                            <input
+                              type="text"
                               value={editFormData.grade || ''}
                               onChange={(e) => setEditFormData({ ...editFormData, grade: e.target.value })}
                               className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                           ) : (
-                            <div className="text-sm text-slate-700">{video.grade || '-'}</div>
+                            <div className="text-sm text-slate-700">{video.grade || (video.grade === null || video.grade === undefined ? '-' : '')}</div>
                           )}
                             </td>
+                        <td className="px-6 py-4">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editFormData.unit || ''}
+                              onChange={(e) => setEditFormData({ ...editFormData, unit: e.target.value })}
+                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          ) : (
+                            <div className="text-sm text-slate-700 font-semibold">{video.unit || (video.unit === null || video.unit === undefined ? '-' : '')}</div>
+                          )}
+                        </td>
                             <td className="px-6 py-4">
                           {isEditing ? (
                                     <input
@@ -822,7 +875,7 @@ function MyStorageManager() {
                               className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                           ) : (
-                            <div className="text-sm text-slate-700">{video.lesson || '-'}</div>
+                            <div className="text-sm text-slate-700">{video.lesson || (video.lesson === null || video.lesson === undefined ? '-' : '')}</div>
                           )}
                         </td>
                         <td className="px-6 py-4">
@@ -834,19 +887,7 @@ function MyStorageManager() {
                               className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                           ) : (
-                            <div className="text-sm text-slate-700">{video.module || '-'}</div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={editFormData.activity || ''}
-                              onChange={(e) => setEditFormData({ ...editFormData, activity: e.target.value })}
-                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          ) : (
-                            <div className="text-sm text-slate-700">{video.activity || '-'}</div>
+                            <div className="text-sm text-slate-700 font-semibold">{video.module || (video.module === null || video.module === undefined ? '-' : '')}</div>
                               )}
                             </td>
                             <td className="px-6 py-4">
@@ -858,50 +899,46 @@ function MyStorageManager() {
                           <div className="text-sm text-slate-700 font-semibold">{formatFileSize(video.size)}</div>
                             </td>
                             <td className="px-6 py-4 text-center">
-                              <div className="flex items-center justify-center gap-2">
-                            {isEditing ? (
-                                  <>
-                                    <button
-                                  onClick={() => handleSaveEdit(video.id)}
-                                  className="text-green-600 hover:text-green-700 transition-all duration-200 p-2 hover:bg-green-50 rounded-xl hover:scale-110"
-                                  title="Save"
-                                >
-                                  <CheckCircle className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={handleCancelEdit}
-                                  className="text-slate-600 hover:text-slate-700 transition-all duration-200 p-2 hover:bg-slate-50 rounded-xl hover:scale-110"
-                                  title="Cancel"
-                                >
-                                  <XCircle className="w-4 h-4" />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => handleEditVideo(video)}
-                                      className="text-blue-600 hover:text-blue-700 transition-all duration-200 p-2 hover:bg-blue-50 rounded-xl hover:scale-110"
-                                  title="Edit"
-                                    >
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-                                      <button
-                                  onClick={() => navigate(`/admin/videos/${video.id}/edit`)}
-                                        className="text-purple-600 hover:text-purple-700 transition-all duration-200 p-2 hover:bg-purple-50 rounded-xl hover:scale-110"
-                                  title="Full Edit"
-                                      >
-                                        <FileVideo className="w-4 h-4" />
-                                      </button>
-                                <button
-                                  onClick={() => handleDeleteVideo(video.id)}
-                                  className="text-red-500 hover:text-red-600 transition-all duration-200 p-2 hover:bg-red-50 rounded-xl hover:scale-110"
-                                  title="Delete"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </>
-                            )}
-                              </div>
+                              {isEditing ? (
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => handleSaveEdit(video.id)}
+                                    className="text-green-600 hover:text-green-700 transition-all duration-200 p-2 hover:bg-green-50 rounded-xl hover:scale-110"
+                                    title="Save"
+                                  >
+                                    <CheckCircle className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={handleCancelEdit}
+                                    className="text-slate-600 hover:text-slate-700 transition-all duration-200 p-2 hover:bg-slate-50 rounded-xl hover:scale-110"
+                                    title="Cancel"
+                                  >
+                                    <XCircle className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-center gap-1">
+                                  {video.status === 'active' ? (
+                                    video.isDuplicate ? (
+                                      <span className="px-2 py-1 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg">
+                                        Duplicate ({video.duplicateCount})
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-1 text-xs font-semibold bg-green-100 text-green-700 rounded-lg">
+                                        Active
+                                      </span>
+                                    )
+                                  ) : video.status === 'failed' || !video.file_path ? (
+                                    <span className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-700 rounded-lg">
+                                      Failed
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-1 text-xs font-semibold bg-slate-100 text-slate-700 rounded-lg">
+                                      {video.status || 'Unknown'}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                           </tr>
                           );

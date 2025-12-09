@@ -162,6 +162,31 @@ export async function findVideoByFileOrUrl(filePath, streamingUrl) {
 }
 
 /**
+ * Check if a video with the same title already exists
+ * @param {string} title - The title to check
+ * @param {boolean} includeInactive - If true, also check inactive videos
+ */
+export async function getVideoByTitle(title, includeInactive = false) {
+  if (!title || title.trim() === '') {
+    return null;
+  }
+  
+  let query = 'SELECT * FROM videos WHERE title = ?';
+  if (!includeInactive) {
+    query += ' AND status = "active"';
+  }
+  query += ' ORDER BY created_at DESC LIMIT 1';
+  
+  try {
+    const [rows] = await pool.execute(query, [title.trim()]);
+    return rows[0] || null;
+  } catch (error) {
+    console.error('Error checking for duplicate title:', error);
+    return null;
+  }
+}
+
+/**
  * Get video by redirect slug (short URL)
  */
 export async function getVideoByRedirectSlug(redirectSlug, includeInactive = false) {
@@ -216,6 +241,22 @@ export async function getAllVideos(filters = {}) {
   if (filters.module) {
     query += ' AND module = ?';
     params.push(filters.module);
+  }
+  
+  // Filter by module number (extract numeric part from module field)
+  if (filters.moduleNumber) {
+    // Extract number from module field and match
+    // This handles cases like "Module 1", "1", "M1", "Module1", etc.
+    const moduleNum = parseInt(filters.moduleNumber);
+    if (!isNaN(moduleNum)) {
+      // Match if module contains the number (handles "Module 1", "1", "M1", etc.)
+      query += ' AND (module LIKE ? OR module LIKE ? OR module LIKE ? OR module = ?)';
+      params.push(`%${moduleNum}%`, `%Module ${moduleNum}%`, `%M${moduleNum}%`, filters.moduleNumber);
+    } else {
+      // If not a number, just do a text search
+      query += ' AND module LIKE ?';
+      params.push(`%${filters.moduleNumber}%`);
+    }
   }
   
   if (filters.activity) {

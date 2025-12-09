@@ -10,17 +10,18 @@ function VideoList() {
   const [filterOptions, setFilterOptions] = useState({
     courses: [],
     grades: [],
+    units: [],
     lessons: [],
-    modules: [],
-    activities: []
+    modules: []
   });
   const [filters, setFilters] = useState({
     search: '',
     course: '',
     grade: '',
+    unit: '',
     lesson: '',
     module: '',
-    activity: '',
+    moduleNumber: '',
     status: 'active'
   });
 
@@ -48,9 +49,10 @@ function VideoList() {
       if (filters.search) params.append('search', filters.search);
       if (filters.course) params.append('course', filters.course);
       if (filters.grade) params.append('grade', filters.grade);
+      if (filters.unit) params.append('unit', filters.unit);
       if (filters.lesson) params.append('lesson', filters.lesson);
       if (filters.module) params.append('module', filters.module);
-      if (filters.activity) params.append('activity', filters.activity);
+      if (filters.moduleNumber) params.append('moduleNumber', filters.moduleNumber);
       if (filters.status) params.append('status', filters.status);
 
       const response = await api.get(`/videos?${params.toString()}`);
@@ -139,7 +141,7 @@ function VideoList() {
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Courses</option>
-              {filterOptions.courses.map((course) => (
+              {filterOptions.courses && filterOptions.courses.map((course) => (
                 <option key={course} value={course}>
                   {course}
                 </option>
@@ -156,9 +158,26 @@ function VideoList() {
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Grades</option>
-              {filterOptions.grades.map((grade) => (
+              {filterOptions.grades && filterOptions.grades.map((grade) => (
                 <option key={grade} value={grade}>
                   {grade}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Unit
+            </label>
+            <select
+              value={filters.unit || ''}
+              onChange={(e) => setFilters({ ...filters, unit: e.target.value })}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
+            >
+              <option value="">All Units</option>
+              {filterOptions.units && filterOptions.units.map((unit) => (
+                <option key={unit} value={unit}>
+                  {unit}
                 </option>
               ))}
             </select>
@@ -173,7 +192,7 @@ function VideoList() {
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Lessons</option>
-              {filterOptions.lessons.map((lesson) => (
+              {filterOptions.lessons && filterOptions.lessons.map((lesson) => (
                 <option key={lesson} value={lesson}>
                   {lesson}
                 </option>
@@ -190,26 +209,9 @@ function VideoList() {
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Modules</option>
-              {filterOptions.modules.map((module) => (
+              {filterOptions.modules && filterOptions.modules.map((module) => (
                 <option key={module} value={module}>
                   {module}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Activity
-            </label>
-            <select
-              value={filters.activity || ''}
-              onChange={(e) => setFilters({ ...filters, activity: e.target.value })}
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
-            >
-              <option value="">All Activities</option>
-              {filterOptions.activities.map((activity) => (
-                <option key={activity} value={activity}>
-                  {activity}
                 </option>
               ))}
             </select>
@@ -230,16 +232,17 @@ function VideoList() {
           </div>
         </div>
         {/* Clear Filters Button */}
-        {(filters.search || filters.course || filters.grade || filters.lesson || filters.module || filters.activity || filters.status !== 'active') && (
+        {(filters.search || filters.course || filters.grade || filters.unit || filters.lesson || filters.module || filters.moduleNumber || filters.status !== 'active') && (
           <div className="mt-6">
             <button
               onClick={() => setFilters({
                 search: '',
                 course: '',
                 grade: '',
+                unit: '',
                 lesson: '',
                 module: '',
-                activity: '',
+                moduleNumber: '',
                 status: 'active'
               })}
               className="px-4 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
@@ -423,26 +426,26 @@ function VideoList() {
                   </div>
 
                   {/* Tags/Pills */}
-                  {(video.grade || video.lesson || video.module || video.activity) && (
+                  {(video.grade || video.unit || video.lesson || video.module) && (
                     <div className="flex flex-wrap gap-2 mb-5">
                       {video.grade && (
                         <span className="px-3 py-1.5 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-700 rounded-lg text-xs font-bold border border-blue-300 shadow-sm">
-                          {video.grade}
+                          Grade: {video.grade}
+                        </span>
+                      )}
+                      {video.unit && (
+                        <span className="px-3 py-1.5 bg-gradient-to-r from-indigo-50 to-indigo-100 text-indigo-700 rounded-lg text-xs font-bold border border-indigo-300 shadow-sm">
+                          Unit: {video.unit}
                         </span>
                       )}
                       {video.lesson && (
                         <span className="px-3 py-1.5 bg-gradient-to-r from-green-50 to-green-100 text-green-700 rounded-lg text-xs font-bold border border-green-300 shadow-sm">
-                          {video.lesson}
+                          Lesson: {video.lesson}
                         </span>
                       )}
                       {video.module && (
                         <span className="px-3 py-1.5 bg-gradient-to-r from-purple-50 to-purple-100 text-purple-700 rounded-lg text-xs font-bold border border-purple-300 shadow-sm">
-                          {video.module}
-                        </span>
-                      )}
-                      {video.activity && (
-                        <span className="px-3 py-1.5 bg-gradient-to-r from-orange-50 to-orange-100 text-orange-700 rounded-lg text-xs font-bold border border-orange-300 shadow-sm">
-                          {video.activity}
+                          Module: {video.module}
                         </span>
                       )}
                     </div>

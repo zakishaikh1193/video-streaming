@@ -26,7 +26,31 @@ function PublicVideoPage() {
     const fetchVideo = async () => {
       try {
         const response = await api.get(`/videos/${videoId}`);
-        setVideo(response.data);
+        const videoData = response.data;
+        
+        // Debug: Log module field to verify it's being received
+        console.log('[PublicVideoPage] Video data received:', {
+          videoId: videoData.video_id,
+          title: videoData.title,
+          module: videoData.module,
+          moduleType: typeof videoData.module,
+          moduleValue: videoData.module,
+          moduleTruthy: !!videoData.module,
+          activity: videoData.activity,
+          grade: videoData.grade,
+          lesson: videoData.lesson,
+          course: videoData.course,
+          allFields: Object.keys(videoData)
+        });
+        
+        // Ensure module is properly set (handle null, undefined, empty string)
+        if (videoData.module === null || videoData.module === undefined || videoData.module === '') {
+          console.warn('[PublicVideoPage] Module field is empty:', videoData.module);
+        } else {
+          console.log('[PublicVideoPage] Module field has value:', videoData.module);
+        }
+        
+        setVideo(videoData);
       } catch (err) {
         setError(err.response?.data?.error || 'Failed to load video');
       } finally {
@@ -123,6 +147,21 @@ function PublicVideoPage() {
   
   console.log('[PublicVideoPage] Final streaming URL that will be passed to VideoPlayer:', streamUrl);
   
+  // Generate filename from Grade + Lesson + Unit in format G1_L1_U1_M1.png
+  const generateQRCodeFilename = () => {
+    const parts = [];
+    if (video.grade) parts.push(`G${video.grade}`);
+    if (video.lesson) parts.push(`L${video.lesson}`);
+    if (video.course) parts.push(`U${video.course}`); // Using course as unit
+    if (video.module) parts.push(`M${video.module}`);
+    
+    if (parts.length > 0) {
+      return parts.join('_') + '.png';
+    }
+    // Fallback to video_id if no metadata
+    return `${video.video_id}_qr_code.png`;
+  };
+
   // Handle QR code download
   const handleDownloadQRCode = async () => {
     try {
@@ -135,15 +174,16 @@ function PublicVideoPage() {
         throw new Error('Empty response from server');
       }
       
+      const filename = generateQRCodeFilename();
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `${video.video_id}_qr_code.png`);
+      link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      console.log('QR code downloaded successfully');
+      console.log('QR code downloaded successfully as:', filename);
     } catch (error) {
       console.error('Error downloading QR code:', error);
       const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
@@ -210,7 +250,18 @@ function PublicVideoPage() {
         heightLeft -= pageHeight;
       }
 
-      pdf.save(`${video.video_id}_qr_code.pdf`);
+      // Generate PDF filename from Grade + Lesson + Unit in format G1_L1_U1_M1.pdf
+      const pdfParts = [];
+      if (video.grade) pdfParts.push(`G${video.grade}`);
+      if (video.lesson) pdfParts.push(`L${video.lesson}`);
+      if (video.course) pdfParts.push(`U${video.course}`); // Using course as unit
+      if (video.module) pdfParts.push(`M${video.module}`);
+      
+      const pdfFilename = pdfParts.length > 0 
+        ? pdfParts.join('_') + '.pdf'
+        : `${video.video_id}_qr_code.pdf`;
+      
+      pdf.save(pdfFilename);
     } catch (error) {
       console.error('Error generating PDF:', error);
       alert(`Failed to generate PDF: ${error.message}`);
@@ -256,12 +307,6 @@ function PublicVideoPage() {
             </h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-              {video.course && (
-                <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
-                  <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide block mb-1">Course</span>
-                  <span className="text-base font-bold text-slate-900">{video.course}</span>
-                </div>
-              )}
               {video.grade && (
                 <div className="bg-green-50 rounded-xl p-4 border border-green-200">
                   <span className="text-xs font-semibold text-green-700 uppercase tracking-wide block mb-1">Grade</span>
@@ -274,10 +319,16 @@ function PublicVideoPage() {
                   <span className="text-base font-bold text-slate-900">{video.lesson}</span>
                 </div>
               )}
-              {video.module && (
+              {video.course !== null && video.course !== undefined && video.course !== '' && (
+                <div className="bg-sky-50 rounded-xl p-4 border border-sky-200">
+                  <span className="text-xs font-semibold text-sky-700 uppercase tracking-wide block mb-1">Unit</span>
+                  <span className="text-base font-bold text-slate-900">{video.course}</span>
+                </div>
+              )}
+              {video.module !== null && video.module !== undefined && video.module !== '' && (
                 <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-200">
                   <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wide block mb-1">Module</span>
-                  <span className="text-base font-bold text-slate-900">{video.module}</span>
+                  <span className="text-base font-bold text-slate-900">{String(video.module)}</span>
                 </div>
               )}
               {video.activity && (

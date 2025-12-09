@@ -7,10 +7,11 @@ import { getBackendBaseUrl } from '../utils/apiConfig';
 function VideoUpload() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
+    course: '',
     grade: '',
+    unit: '',
     lesson: '',
     module: '',
-    activity: '',
     topic: '',
     title: '',
     description: '',
@@ -37,7 +38,10 @@ function VideoUpload() {
     if (file) {
       const extMatch = file.name.match(/\.[^/.]+$/);
       const ext = extMatch ? extMatch[0] : '.mp4';
-      const newId = `VID_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      // Strong and short ID: timestamp (5 chars) + random (5 chars) = 10 chars total
+      const timestamp = Date.now().toString(36).slice(-5).toUpperCase();
+      const random = Math.random().toString(36).slice(2, 7).toUpperCase();
+      const newId = `VID_${timestamp}${random}`;
       const backendBase = getBackendBaseUrl();
       setDraftId(newId);
       setPlannedPath(`upload/${newId}${ext}`);
@@ -102,6 +106,10 @@ function VideoUpload() {
       Object.keys(formData).forEach(key => {
         uploadData.append(key, formData[key]);
       });
+      // Also send unit if provided (will be stored in course field if course is empty)
+      if (formData.unit) {
+        uploadData.append('unit', formData.unit);
+      }
 
       const response = await api.post('/videos/upload', uploadData, {
         headers: {
@@ -163,7 +171,7 @@ function VideoUpload() {
           </div>
           <div className="flex-1">
             <p className="text-sm text-blue-800 font-semibold mb-1">
-              <strong>Hierarchy:</strong> Grade → Lesson → Module → Activity
+              <strong>Hierarchy:</strong> Course → Grade → Unit → Lesson → Module
             </p>
             <p className="text-xs text-blue-700">All fields are optional. Fill in what applies to your video.</p>
           </div>
@@ -175,6 +183,20 @@ function VideoUpload() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-3">
+                Course
+              </label>
+              <input
+                type="text"
+                name="course"
+                value={formData.course}
+                onChange={handleChange}
+                placeholder="e.g., Course Name"
+                className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-3">
                 Grade
               </label>
               <input
@@ -183,6 +205,20 @@ function VideoUpload() {
                 value={formData.grade}
                 onChange={handleChange}
                 placeholder="e.g., Grade 3 or Grade Name"
+                className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-3">
+                Unit
+              </label>
+              <input
+                type="text"
+                name="unit"
+                value={formData.unit}
+                onChange={handleChange}
+                placeholder="e.g., Unit 1 or Unit Name"
                 className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
               />
             </div>
@@ -211,20 +247,6 @@ function VideoUpload() {
                 value={formData.module}
                 onChange={handleChange}
                 placeholder="e.g., Module 1 or Module Name"
-                className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-3">
-                Activity
-              </label>
-              <input
-                type="text"
-                name="activity"
-                value={formData.activity}
-                onChange={handleChange}
-                placeholder="e.g., Activity 1 or Activity Name"
                 className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
               />
             </div>
@@ -375,7 +397,7 @@ function VideoUpload() {
               <code className="bg-white border border-slate-200 px-2 py-1 rounded text-xs font-mono">{plannedPath}</code>
             </div>
             <div className="text-xs text-slate-600">
-              Note: Only the ID is used for uniqueness; Grade/Lesson/Unit/Module/Activity are informational.
+              Note: Only the ID is used for uniqueness; Course/Grade/Unit/Lesson/Module are informational.
             </div>
           </div>
         )}

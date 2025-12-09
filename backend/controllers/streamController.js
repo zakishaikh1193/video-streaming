@@ -257,12 +257,21 @@ export async function streamVideo(req, res) {
     // Browser requests typically have Accept: text/html
     // Video player requests have Range header for seeking or specific video MIME types
     const acceptHeader = req.headers.accept || '';
-    const hasRangeHeader = req.headers.range;
+    const hasRangeHeader = !!req.headers.range;
     const userAgent = req.headers['user-agent'] || '';
+    
+    // Video player requests ALWAYS have Range header or specific video MIME types
+    // If Range header is present, it's definitely a video player request (highest priority)
     const isVideoPlayerRequest = hasRangeHeader || 
                                  acceptHeader.includes('video/') || 
-                                 acceptHeader.includes('application/octet-stream');
-    const isBrowserRequest = !isVideoPlayerRequest && 
+                                 acceptHeader.includes('application/octet-stream') ||
+                                 acceptHeader.includes('application/vnd.apple.mpegurl'); // HLS
+    
+    // Browser requests are ONLY those that explicitly request HTML and have NO Range header
+    // If Range header exists, it's NEVER a browser request
+    // Empty accept header without Range is treated as browser request only for initial page loads
+    const isBrowserRequest = !hasRangeHeader && // Must not have Range header
+                            !isVideoPlayerRequest && // Must not be a video player request
                             (acceptHeader.includes('text/html') || 
                              acceptHeader === '' || 
                              acceptHeader.includes('*/*'));
@@ -497,10 +506,13 @@ export async function streamVideo(req, res) {
         const currentHost = req.get('host') || req.hostname || 'localhost:5000';
         const cloudflareHost = urlObj.hostname + (urlObj.port ? `:${urlObj.port}` : '');
         
-        // Check if it's pointing to our own server
+        // Check if it's pointing to our own server (prevent redirect loops)
+        const currentHostname = req.get('host') || req.hostname || 'localhost:5000';
         const isOwnServer = cloudflareHost.includes('localhost') || 
                            cloudflareHost.includes('127.0.0.1') ||
-                           (urlObj.pathname && urlObj.pathname.includes('/api/videos/') && urlObj.pathname.includes('/stream'));
+                           cloudflareHost === currentHostname ||
+                           cloudflareHost.includes(currentHostname.split(':')[0]) || // Match hostname without port
+                           (urlObj.pathname && (urlObj.pathname.includes('/api/videos/') || urlObj.pathname.includes('/api/s/') || urlObj.pathname.includes('/s/')));
         
         if (isOwnServer) {
           console.warn('Cloudflare URL points to our own server, preventing redirect loop:', cloudflareUrl);
@@ -532,6 +544,7 @@ export async function streamVideo(req, res) {
       : path.resolve(basePath, config.upload.uploadPath);
     const myStoragePath = path.join(uploadPath, 'my-storage');
     const miscPath = path.join(uploadPath, 'misc');
+    const backendUploadPath = path.join(basePath, 'upload'); // Check backend/upload directory
     
     let filePath = null;
     
@@ -568,6 +581,31 @@ export async function streamVideo(req, res) {
       } else {
         console.log('⚠ Fixed format path does not exist:', fixedFormatPath);
         console.log('⚠ Will try database file_path and other paths...');
+      }
+    }
+    
+    // PRIORITY 0.75: Check backend/upload directory (for files uploaded directly to backend/upload)
+    if (!filePath && video.redirect_slug) {
+      const backendUploadSlugPath = path.join(backendUploadPath, `${video.redirect_slug}.mp4`);
+      if (fs.existsSync(backendUploadSlugPath)) {
+        filePath = backendUploadSlugPath;
+        console.log('✓✓✓✓ FOUND IN BACKEND/UPLOAD (redirect_slug):', filePath);
+      }
+    }
+    if (!filePath && video.video_id) {
+      const backendUploadVideoIdPath = path.join(backendUploadPath, `${video.video_id}.mp4`);
+      if (fs.existsSync(backendUploadVideoIdPath)) {
+        filePath = backendUploadVideoIdPath;
+        console.log('✓✓✓✓ FOUND IN BACKEND/UPLOAD (video_id):', filePath);
+      }
+    }
+    // Also check by filename from database
+    if (!filePath && video.file_path) {
+      const fileName = path.basename(video.file_path);
+      const backendUploadFileNamePath = path.join(backendUploadPath, fileName);
+      if (fs.existsSync(backendUploadFileNamePath)) {
+        filePath = backendUploadFileNamePath;
+        console.log('✓✓✓✓ FOUND IN BACKEND/UPLOAD (filename):', filePath);
       }
     }
     
@@ -637,9 +675,14 @@ export async function streamVideo(req, res) {
         filePathFromDb: video.file_path
       });
       
-      // If file_path is just a filename, try my-storage first, then misc
+      // If file_path is just a filename, try backend/upload first, then my-storage, then misc
       const fileName = path.basename(video.file_path);
       if (fileName) {
+        // Try backend/upload first
+        const backendUploadFile = path.join(backendUploadPath, fileName);
+        if (fs.existsSync(backendUploadFile)) {
+          possiblePaths.unshift(backendUploadFile);
+        }
         if (video.video_id) {
           // Try fixed format first
           possiblePaths.unshift(path.join(myStoragePath, `${video.video_id}.mp4`));
@@ -667,6 +710,19 @@ export async function streamVideo(req, res) {
       // Strategy 5: If file_path doesn't include folder, try adding misc (most common case)
       if (!video.file_path.includes('/') && !video.file_path.includes('\\')) {
         possiblePaths.push(path.join(miscPath, video.file_path));
+      }
+      
+      // Strategy 5.5: Try backend/upload directory (for files uploaded directly to backend/upload)
+      if (fs.existsSync(backendUploadPath)) {
+        possiblePaths.push(path.join(backendUploadPath, normalizedFilePath));
+        possiblePaths.push(path.join(backendUploadPath, fileName));
+        // Also try with redirect_slug and video_id
+        if (video.redirect_slug) {
+          possiblePaths.push(path.join(backendUploadPath, `${video.redirect_slug}.mp4`));
+        }
+        if (video.video_id) {
+          possiblePaths.push(path.join(backendUploadPath, `${video.video_id}.mp4`));
+        }
       }
       
       // Strategy 6: Try original upload path structure (relative to backend)
@@ -740,9 +796,47 @@ export async function streamVideo(req, res) {
         });
       }
       
-      // If still not found, search misc folder by filename (fallback)
+      // If still not found, search backend/upload folder first, then misc folder (fallback)
       if (!filePath) {
-        if (fs.existsSync(miscPath)) {
+        // First try backend/upload folder
+        if (fs.existsSync(backendUploadPath)) {
+          try {
+            const fileName = path.basename(video.file_path);
+            const backendUploadFiles = fs.readdirSync(backendUploadPath).filter(f => 
+              f.endsWith('.mp4') || f.endsWith('.mov') || f.endsWith('.webm')
+            );
+            console.log('Searching backend/upload folder for:', fileName);
+            console.log('Total video files in backend/upload:', backendUploadFiles.length);
+            
+            // Try exact match first
+            const exactMatch = backendUploadFiles.find(f => f === fileName || f.toLowerCase() === fileName.toLowerCase());
+            if (exactMatch) {
+              filePath = path.join(backendUploadPath, exactMatch);
+              console.log('✓✓✓ FOUND IN BACKEND/UPLOAD (exact match):', filePath);
+            } else {
+              // Try by redirect_slug or video_id
+              if (video.redirect_slug) {
+                const slugMatch = backendUploadFiles.find(f => f.includes(video.redirect_slug) || f.toLowerCase().includes(video.redirect_slug.toLowerCase()));
+                if (slugMatch) {
+                  filePath = path.join(backendUploadPath, slugMatch);
+                  console.log('✓✓✓ FOUND IN BACKEND/UPLOAD (by slug):', filePath);
+                }
+              }
+              if (!filePath && video.video_id) {
+                const videoIdMatch = backendUploadFiles.find(f => f.includes(video.video_id) || f.toLowerCase().includes(video.video_id.toLowerCase()));
+                if (videoIdMatch) {
+                  filePath = path.join(backendUploadPath, videoIdMatch);
+                  console.log('✓✓✓ FOUND IN BACKEND/UPLOAD (by video_id):', filePath);
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('Error checking backend/upload folder:', err.message);
+          }
+        }
+        
+        // If still not found, try misc folder
+        if (!filePath && fs.existsSync(miscPath)) {
           try {
             const fileName = path.basename(video.file_path); // e.g., VID_1764745515981_master.mp4
             const miscFiles = fs.readdirSync(miscPath).filter(f => 

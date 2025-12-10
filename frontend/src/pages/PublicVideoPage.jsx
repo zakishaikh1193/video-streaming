@@ -272,16 +272,36 @@ function PublicVideoPage() {
     window.print();
   };
 
+  // Build captions array for CC (supports various backend field names)
+  const captions = (() => {
+    if (video?.captions && Array.isArray(video.captions)) return video.captions;
+    const candidates = [
+      video?.captions_url,
+      video?.caption_url,
+      video?.subtitle_url,
+      video?.subtitles_url
+    ].filter(Boolean);
+    if (candidates.length > 0) {
+      return [{
+        src: candidates[0],
+        label: 'English',
+        language: 'en',
+        default: true
+      }];
+    }
+    return [];
+  })();
+
   return (
     <div className={`w-full px-4 sm:px-6 lg:px-8 py-8 ${isEmbed ? '' : 'min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50'}`}>
       <div className="w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-blue-100 max-w-4xl mx-auto">
-            <VideoPlayer 
-              src={streamUrl} 
-              captions={video.captions || []} 
-              videoId={video.video_id || videoId}
-            />
+          <VideoPlayer 
+            src={streamUrl} 
+            captions={captions}
+            videoId={video.video_id || videoId}
+          />
           </div>
           
           {/* Video Title Section */}

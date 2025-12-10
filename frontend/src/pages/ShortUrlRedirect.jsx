@@ -238,6 +238,26 @@ function ShortUrlRedirect() {
     streamingUrl = `${backendUrl}/s/${streamIdentifier}`;
   }
 
+  // Build captions array for CC (supports different backend field names)
+  const captions = (() => {
+    if (video?.captions && Array.isArray(video.captions)) return video.captions;
+    const candidates = [
+      video?.captions_url,
+      video?.caption_url,
+      video?.subtitle_url,
+      video?.subtitles_url
+    ].filter(Boolean);
+    if (candidates.length > 0) {
+      return [{
+        src: candidates[0],
+        label: 'English',
+        language: 'en',
+        default: true
+      }];
+    }
+    return [];
+  })();
+
   return (
     <>
       <style>{`
@@ -271,8 +291,23 @@ function ShortUrlRedirect() {
         /* Ensure video player controls are visible in fullscreen */
         .video-js {
           width: 100% !important;
-          height: 85% !important;
+          height: 100% !important;
           background: #000 !important;
+        }
+        
+        /* Custom scrollbar for subject information panel */
+        .subject-info-panel::-webkit-scrollbar {
+          width: 6px;
+        }
+        .subject-info-panel::-webkit-scrollbar-track {
+          background: #1a1a1a;
+        }
+        .subject-info-panel::-webkit-scrollbar-thumb {
+          background: #4a4a4a;
+          border-radius: 3px;
+        }
+        .subject-info-panel::-webkit-scrollbar-thumb:hover {
+          background: #5a5a5a;
         }
         
         .video-js .vjs-control-bar {
@@ -371,11 +406,6 @@ function ShortUrlRedirect() {
           margin-left: 8px !important;
           order: 6 !important;
         }
-        /* Hide captions button completely */
-        .video-js .vjs-subs-caps-button {
-          display: none !important;
-          visibility: hidden !important;
-        }
         /* Ensure big play button works */
         .video-js .vjs-big-play-button {
           cursor: pointer !important;
@@ -466,15 +496,25 @@ function ShortUrlRedirect() {
         }}
       >
         {streamingUrl && video ? (
-          <div className="w-full h-full flex items-center justify-center relative">
-            {/* Fullscreen Video Player - Controls must be visible */}
-            <div className="w-full h-full relative" style={{ position: 'relative', zIndex: 1 }}>
-              <VideoPlayer 
-                src={streamingUrl} 
-                captions={video.captions || []} 
-                autoplay={true}
-                videoId={video.video_id || slug}
-              />
+          <div className="w-full h-full flex relative">
+            {/* Video Player - 75% width on left */}
+            <div className="w-3/4 h-full relative" style={{ position: 'relative', zIndex: 1 }}>
+          <VideoPlayer 
+            src={streamingUrl} 
+            captions={captions}
+            autoplay={true}
+            videoId={video.video_id || slug}
+          />
+              <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2 ml-20">DESCRIPTION</div>
+                    <div className="w-full px-3 py-2.5 text-sm text-gray-300 bg-gray-900 border border-gray-700 rounded-lg min-h-[100px] ml-20">
+                      {video.description && video.description.trim() !== '' ? (
+                        <div className="whitespace-pre-wrap break-words">{video.description}</div>
+                      ) : (
+                        <div className="text-gray-500 italic">No description available</div>
+                      )}
+                    </div>
+                  </div>
             </div>
             
             {/* Error Messages */}

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Player with Auto Subtitles</title>
+    <style>
+        /* Subtitle Positioning - Above the bottom, inside video */
+        video {
+            position: relative;
+        }
+        
+        /* Position subtitles above control bar */
+        video::cue {
+            font-size: 18px !important;
+            font-weight: 600 !important;
+            color: #ffffff !important;
+            background: rgba(0, 0, 0, 0.85) !important;
+            padding: 10px 20px !important;
+            border-radius: 6px !important;
+            text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.9) !important;
+            line-height: 1.5 !important;
+        }
+        
+        /* WebKit browsers - move subtitles up */
+        video::-webkit-media-text-track-display {
+            transform: translateY(-50px);
+        }
+        
+        /* Ensure subtitles are visible */
+        video::cue {
+            display: block;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Video Player with Auto-Generated Subtitles</h1>
+    
+    <!-- Your existing video element -->
+    <video id="my-video" controls width="800">
+        <source src="your-video.mp4" type="video/mp4">
+        
+        <!-- Add this track element for subtitles -->
+        <track id="subtitle-track" kind="subtitles" srclang="en" label="English" default />
+    </video>
+    
+    <br><br>
+    
+    <!-- File input for video upload and subtitle generation -->
+    <input type="file" id="video-file" accept="video/*">
+    <button onclick="generateSubtitles()">Generate Subtitles</button>
+    <div id="status"></div>
+
+    <script>
+        // ============================================
+        // MINIMAL CODE: Apply Subtitles Function
+        // ============================================
+        function applySubtitles(vttUrl) {
+            const trackElement = document.getElementById('subtitle-track');
+            if (trackElement) {
+                trackElement.src = vttUrl;
+                console.log('Subtitles applied:', vttUrl);
+                
+                // Enable the track
+                const video = document.getElementById('my-video');
+                if (video && video.textTracks && video.textTracks.length > 0) {
+                    for (let i = 0; i < video.textTracks.length; i++) {
+                        if (video.textTracks[i].kind === 'subtitles') {
+                            video.textTracks[i].mode = 'showing';
+                        }
+                    }
+                }
+                return true;
+            }
+            console.warn('Subtitle track element not found');
+            return false;
+        }
+
+        // ============================================
+        // Generate Subtitles from Video File
+        // ============================================
+        async function generateSubtitles() {
+            const fileInput = document.getElementById('video-file');
+            const videoFile = fileInput.files[0];
+            
+            if (!videoFile) {
+                document.getElementById('status').textContent = 'Please select a video file';
+                return;
+            }
+
+            document.getElementById('status').textContent = 'Generating subtitles...';
+            
+            const formData = new FormData();
+            formData.append('video', videoFile);
+            
+            try {
+                const response = await fetch('/api/subtitles/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.vttUrl) {
+                    // Apply subtitles to your video
+                    applySubtitles(result.vttUrl);
+                    document.getElementById('status').textContent = 
+                        'Subtitles generated and applied! VTT URL: ' + result.vttUrl;
+                } else {
+                    document.getElementById('status').textContent = 
+                        'Error: ' + (result.error || 'Unknown error');
+                }
+            } catch (error) {
+                console.error('Error generating subtitles:', error);
+                document.getElementById('status').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        // ============================================
+        // Alternative: If you already have vttUrl
+        // ============================================
+        // Just call: applySubtitles('http://localhost:5000/subtitles/your-file.vtt');
+    </script>
+</body>
+</html>
+

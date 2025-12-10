@@ -1,0 +1,17 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Hello, welcome to this video tutorial.
+
+00:00:05.000 --> 00:00:10.000
+Today we will learn about automatic subtitle generation.
+
+00:00:10.000 --> 00:00:15.000
+This is powered by Whisper.cpp, a local speech recognition model.
+
+00:00:15.000 --> 00:00:20.000
+The subtitles are generated automatically from the video's audio track.
+
+00:00:20.000 --> 00:00:25.000
+You can use these subtitles to improve accessibility and user experience.
+

@@ -50,3 +50,4 @@ CALL RenameCourseToSubject();
 -- Drop the procedure
 DROP PROCEDURE IF EXISTS RenameCourseToSubject;
 
+

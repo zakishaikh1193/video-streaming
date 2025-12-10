@@ -421,7 +421,8 @@ export async function uploadVideo(req, res) {
 
     // Get form data
     const {
-      course,
+      subject,
+      course, // Keep for backward compatibility
       grade,
       unit,
       lesson,
@@ -436,8 +437,17 @@ export async function uploadVideo(req, res) {
       plannedPath
     } = req.body;
 
-    // Log received form data to verify course, unit, and module are being received
+    // Normalize subject (fallback to course for backward compatibility)
+    const normalizedSubject =
+      subject !== undefined && subject !== null && subject !== ''
+        ? subject
+        : course !== undefined && course !== null && course !== ''
+        ? course
+        : null;
+
+    // Log received form data to verify subject, unit, and module are being received
     console.log('[Upload Video] Extracted form data:', {
+      subject: normalizedSubject !== undefined ? `"${normalizedSubject}"` : 'undefined',
       course: course !== undefined ? `"${course}"` : 'undefined',
       grade: grade !== undefined ? `"${grade}"` : 'undefined',
       unit: unit !== undefined ? `"${unit}"` : 'undefined',
@@ -445,11 +455,7 @@ export async function uploadVideo(req, res) {
       module: module !== undefined ? `"${module}"` : 'undefined',
       title: title !== undefined ? `"${title}"` : 'undefined',
       description: description !== undefined ? `"${description}"` : 'undefined',
-      status: status !== undefined ? `"${status}"` : 'undefined',
-      subjectType: typeof subjectValue,
-      courseType: typeof course,
-      gradeType: typeof grade,
-      unitType: typeof unit
+      status: status !== undefined ? `"${status}"` : 'undefined'
     });
 
     // Check for duplicate title - prevent upload if title already exists
@@ -578,7 +584,9 @@ export async function uploadVideo(req, res) {
       title: title || videoId,
       description: description !== undefined && description !== null ? description : '',
       language,
-      subject: subjectValue !== undefined && subjectValue !== null && subjectValue.trim() !== '' ? subjectValue.trim() : null,
+      subject: normalizedSubject !== null && normalizedSubject !== undefined && String(normalizedSubject).trim() !== ''
+        ? String(normalizedSubject).trim()
+        : null,
       grade: grade !== undefined && grade !== null && grade.toString().trim() !== '' ? grade.toString().trim() : null,
       unit: unit !== undefined && unit !== null && unit.toString().trim() !== '' ? unit.toString().trim() : null,
       lesson: lesson !== undefined && lesson !== null && lesson.toString().trim() !== '' ? lesson.toString().trim() : null,
@@ -602,7 +610,7 @@ export async function uploadVideo(req, res) {
       module: videoData.module,
       status: videoData.status,
       description: videoData.description,
-      rawFormData: { subject: subjectValue, course, grade, unit, lesson, module, description }
+      rawFormData: { subject: normalizedSubject, course, grade, unit, lesson, module, description }
     });
 
     // Create video record and redirect in parallel (faster)
@@ -943,11 +951,11 @@ export async function getAllQRCodes(req, res) {
         video_id as videoId,
         title,
         subject,
+        course,
         grade,
+        unit,
         lesson,
         module,
-        activity,
-        topic,
         redirect_slug as shortSlug,
         qr_url as qrUrl,
         streaming_url as streamingUrl,
@@ -971,13 +979,12 @@ export async function getAllQRCodes(req, res) {
       return {
         videoId: video.videoId,
         title: video.title || video.videoId,
-        subject: video.subject || null,
-        course: video.subject || null, // Backward compatibility
+        subject: video.subject || video.course || null,
+        course: video.subject || video.course || null, // Backward compatibility
         grade: video.grade || null,
+        unit: video.unit || null,
         lesson: video.lesson || null,
         module: video.module || null,
-        activity: video.activity || null,
-        topic: video.topic || null,
         shortSlug: video.shortSlug || null,
         shortUrl: shortUrl,
         qrUrl: video.qrUrl || null,

@@ -19,3 +19,4 @@ if (typeof generateUniqueShortId === 'function') {
   process.exit(1);
 }
 
+

@@ -12,7 +12,6 @@ function VideoUpload() {
     unit: '',
     lesson: '',
     module: '',
-    topic: '',
     title: '',
     description: '',
     language: 'en'
@@ -251,19 +250,6 @@ function VideoUpload() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-3">
-                Topic
-              </label>
-              <input
-                type="text"
-                name="topic"
-                value={formData.topic}
-                onChange={handleChange}
-                placeholder="Optional"
-                className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
-              />
-            </div>
           </div>
         </div>
 

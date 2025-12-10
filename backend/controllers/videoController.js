@@ -330,7 +330,35 @@ export async function getVideoReplacementDiagnostic(req, res) {
 export async function getAllVideos(req, res) {
   try {
     const videos = await videoService.getAllVideos(req.query);
-    res.json(videos);
+    
+    // Log to verify subject information is being returned
+    if (videos.length > 0) {
+      const sampleVideo = videos[0];
+      console.log('[getAllVideos Controller] Sample video subject info:', {
+        id: sampleVideo.id,
+        video_id: sampleVideo.video_id,
+        title: sampleVideo.title,
+        subject: sampleVideo.subject,
+        course: sampleVideo.course,
+        grade: sampleVideo.grade,
+        unit: sampleVideo.unit,
+        lesson: sampleVideo.lesson,
+        module: sampleVideo.module,
+        subjectType: typeof sampleVideo.subject,
+        unitType: typeof sampleVideo.unit,
+        moduleType: typeof sampleVideo.module,
+        allKeys: Object.keys(sampleVideo)
+      });
+    }
+    
+    // Ensure all videos have subject field explicitly set (for backward compatibility)
+    const videosWithSubject = videos.map(video => ({
+      ...video,
+      subject: video.subject !== undefined ? video.subject : (video.course !== undefined ? video.course : null),
+      course: video.subject !== undefined ? video.subject : (video.course !== undefined ? video.course : null) // Backward compatibility
+    }));
+    
+    res.json(videosWithSubject);
   } catch (error) {
     console.error('Get all videos error:', error);
     res.status(500).json({ error: error.message });
@@ -360,7 +388,8 @@ export async function getVideo(req, res) {
       // Preserve module value exactly as it is (including empty strings, 0, etc.)
       module: video.hasOwnProperty('module') ? video.module : null,
       activity: video.hasOwnProperty('activity') ? video.activity : null,
-      course: video.hasOwnProperty('course') ? video.course : null,
+      subject: video.hasOwnProperty('subject') ? video.subject : null,
+      course: video.hasOwnProperty('subject') ? video.subject : null, // Backward compatibility
       grade: video.hasOwnProperty('grade') ? video.grade : null,
       lesson: video.hasOwnProperty('lesson') ? video.lesson : null
     };
@@ -385,10 +414,16 @@ export async function uploadVideo(req, res) {
     console.log(`[Upload Video] ===== STARTING VIDEO UPLOAD =====`);
     console.log(`[Upload Video] File: ${videoFile.originalname}, size: ${videoFile.size} bytes`);
 
+    // Log the entire req.body to see what multer parsed
+    console.log('[Upload Video] Full req.body:', JSON.stringify(req.body, null, 2));
+    console.log('[Upload Video] req.body keys:', Object.keys(req.body));
+    console.log('[Upload Video] Content-Type:', req.headers['content-type']);
+
     // Get form data
     const {
       course,
       grade,
+      unit,
       lesson,
       module,
       activity,
@@ -396,9 +431,26 @@ export async function uploadVideo(req, res) {
       title,
       description,
       language = 'en',
+      status = 'active',
       videoId: requestedVideoId,
       plannedPath
     } = req.body;
+
+    // Log received form data to verify course, unit, and module are being received
+    console.log('[Upload Video] Extracted form data:', {
+      course: course !== undefined ? `"${course}"` : 'undefined',
+      grade: grade !== undefined ? `"${grade}"` : 'undefined',
+      unit: unit !== undefined ? `"${unit}"` : 'undefined',
+      lesson: lesson !== undefined ? `"${lesson}"` : 'undefined',
+      module: module !== undefined ? `"${module}"` : 'undefined',
+      title: title !== undefined ? `"${title}"` : 'undefined',
+      description: description !== undefined ? `"${description}"` : 'undefined',
+      status: status !== undefined ? `"${status}"` : 'undefined',
+      subjectType: typeof subjectValue,
+      courseType: typeof course,
+      gradeType: typeof grade,
+      unitType: typeof unit
+    });
 
     // Check for duplicate title - prevent upload if title already exists
     if (title && title.trim() !== '') {
@@ -520,15 +572,17 @@ export async function uploadVideo(req, res) {
     console.log(`[Upload Video] Streaming URL: ${streamingUrl}`);
 
     // Create video record in database (with retry on duplicate video_id)
+    // Preserve empty strings - don't convert to null if they're intentionally empty
     let videoData = {
       videoId,
       title: title || videoId,
-      description: description || '',
+      description: description !== undefined && description !== null ? description : '',
       language,
-      course: course || null,
-      grade: grade || null,
-      lesson: lesson || null,
-      module: module || null,
+      subject: subjectValue !== undefined && subjectValue !== null && subjectValue.trim() !== '' ? subjectValue.trim() : null,
+      grade: grade !== undefined && grade !== null && grade.toString().trim() !== '' ? grade.toString().trim() : null,
+      unit: unit !== undefined && unit !== null && unit.toString().trim() !== '' ? unit.toString().trim() : null,
+      lesson: lesson !== undefined && lesson !== null && lesson.toString().trim() !== '' ? lesson.toString().trim() : null,
+      module: module !== undefined && module !== null && module.toString().trim() !== '' ? module.toString().trim() : null,
       activity: activity || null,
       topic: topic || null,
       filePath: relativePath, // Relative path: upload/filename.mp4
@@ -536,8 +590,20 @@ export async function uploadVideo(req, res) {
       qrUrl,
       redirectSlug,
       size: fileSize,
-      status: 'active'
+      status: status || 'active'
     };
+    
+    console.log('[Upload Video] Video data to save:', {
+      videoId,
+      subject: videoData.subject,
+      grade: videoData.grade,
+      unit: videoData.unit,
+      lesson: videoData.lesson,
+      module: videoData.module,
+      status: videoData.status,
+      description: videoData.description,
+      rawFormData: { subject: subjectValue, course, grade, unit, lesson, module, description }
+    });
 
     console.log(`[Upload Video] Creating video record in database...`);
     let insertId;
@@ -574,6 +640,14 @@ export async function uploadVideo(req, res) {
       throw new Error('Video was created but could not be retrieved from database');
     }
     console.log(`[Upload Video] ✓ Video retrieved: ID ${video.id}, Video ID: ${video.video_id}`);
+    console.log('[Upload Video] Retrieved video subject info from database:', {
+      subject: video.subject,
+      grade: video.grade,
+      unit: video.unit,
+      lesson: video.lesson,
+      module: video.module,
+      description: video.description
+    });
 
     // Create redirect entry
     try {
@@ -592,18 +666,31 @@ export async function uploadVideo(req, res) {
     console.log(`[Upload Video] ✓ Streaming URL: ${streamingUrl}`);
     console.log(`[Upload Video] =================================`);
 
+    // Construct response - preserve null values, don't convert to undefined
+    const responseVideo = {
+      id: video.id,
+      video_id: video.video_id,
+      title: video.title,
+      file_path: video.file_path,
+      streaming_url: video.streaming_url,
+      redirect_slug: video.redirect_slug,
+      qr_url: video.qr_url,
+      subject: video.subject !== undefined && video.subject !== null ? video.subject : null,
+      course: video.subject !== undefined && video.subject !== null ? video.subject : null, // Backward compatibility
+      grade: video.grade !== undefined && video.grade !== null ? video.grade : null,
+      unit: video.unit !== undefined && video.unit !== null ? video.unit : null,
+      lesson: video.lesson !== undefined && video.lesson !== null ? video.lesson : null,
+      module: video.module !== undefined && video.module !== null ? video.module : null,
+      status: video.status || 'active',
+      description: video.description !== undefined && video.description !== null ? video.description : ''
+    };
+    
+    console.log('[Upload Video] Response video object:', JSON.stringify(responseVideo, null, 2));
+    
     res.status(201).json({
       success: true,
       message: 'Video uploaded successfully',
-      video: {
-        id: video.id,
-        video_id: video.video_id,
-        title: video.title,
-        file_path: video.file_path,
-        streaming_url: video.streaming_url,
-        redirect_slug: video.redirect_slug,
-        qr_url: video.qr_url
-      },
+      video: responseVideo,
       file_path: relativePath,
       file_size: fileSize,
       upload_url: `${config.urls.base}/upload/${fileName}`,
@@ -871,7 +958,7 @@ export async function getAllQRCodes(req, res) {
         id,
         video_id as videoId,
         title,
-        course,
+        subject,
         grade,
         lesson,
         module,
@@ -900,7 +987,8 @@ export async function getAllQRCodes(req, res) {
       return {
         videoId: video.videoId,
         title: video.title || video.videoId,
-        course: video.course || null,
+        subject: video.subject || null,
+        course: video.subject || null, // Backward compatibility
         grade: video.grade || null,
         lesson: video.lesson || null,
         module: video.module || null,

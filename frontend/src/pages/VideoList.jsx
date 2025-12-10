@@ -8,7 +8,8 @@ function VideoList() {
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterOptions, setFilterOptions] = useState({
-    courses: [],
+    subjects: [],
+    courses: [], // Keep for backward compatibility
     grades: [],
     units: [],
     lessons: [],
@@ -16,7 +17,8 @@ function VideoList() {
   });
   const [filters, setFilters] = useState({
     search: '',
-    course: '',
+    subject: '',
+    course: '', // Keep for backward compatibility
     grade: '',
     unit: '',
     lesson: '',
@@ -47,7 +49,8 @@ function VideoList() {
     try {
       const params = new URLSearchParams();
       if (filters.search) params.append('search', filters.search);
-      if (filters.course) params.append('course', filters.course);
+      if (filters.subject) params.append('subject', filters.subject);
+      if (filters.course) params.append('subject', filters.course); // Backward compatibility - map course to subject
       if (filters.grade) params.append('grade', filters.grade);
       if (filters.unit) params.append('unit', filters.unit);
       if (filters.lesson) params.append('lesson', filters.lesson);
@@ -56,7 +59,44 @@ function VideoList() {
       if (filters.status) params.append('status', filters.status);
 
       const response = await api.get(`/videos?${params.toString()}`);
-      setVideos(response.data);
+      const videosData = response.data || [];
+      
+      // Log to verify subject information is being fetched from database - show all fields including nulls
+      if (videosData.length > 0) {
+        console.log('[VideoList] Fetched videos from database:', videosData.length);
+        const sampleVideo = videosData[0];
+        console.log('[VideoList] Sample video with ALL subject info (including nulls):', {
+          id: sampleVideo.id,
+          video_id: sampleVideo.video_id,
+          title: sampleVideo.title,
+          subject: sampleVideo.subject,
+          course: sampleVideo.course, // Backward compatibility
+          grade: sampleVideo.grade,
+          unit: sampleVideo.unit,
+          lesson: sampleVideo.lesson,
+          module: sampleVideo.module,
+          description: sampleVideo.description,
+          status: sampleVideo.status,
+          // Show types to verify data
+          subjectType: typeof sampleVideo.subject,
+          courseType: typeof sampleVideo.course,
+          gradeType: typeof sampleVideo.grade,
+          unitType: typeof sampleVideo.unit,
+          lessonType: typeof sampleVideo.lesson,
+          moduleType: typeof sampleVideo.module,
+          // Show all available keys
+          allKeys: Object.keys(sampleVideo),
+          // Show raw values for debugging
+          rawSubject: sampleVideo.subject,
+          rawCourse: sampleVideo.course,
+          rawGrade: sampleVideo.grade,
+          rawUnit: sampleVideo.unit,
+          rawLesson: sampleVideo.lesson,
+          rawModule: sampleVideo.module
+        });
+      }
+      
+      setVideos(videosData);
     } catch (error) {
       console.error('Failed to fetch videos:', error);
     } finally {
@@ -133,17 +173,17 @@ function VideoList() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Course
+              Subject
             </label>
             <select
-              value={filters.course || ''}
-              onChange={(e) => setFilters({ ...filters, course: e.target.value })}
+              value={filters.subject || filters.course || ''}
+              onChange={(e) => setFilters({ ...filters, subject: e.target.value, course: e.target.value })}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
-              <option value="">All Courses</option>
-              {filterOptions.courses && filterOptions.courses.map((course) => (
-                <option key={course} value={course}>
-                  {course}
+              <option value="">All Subjects</option>
+              {(filterOptions.subjects || filterOptions.courses || []).map((subject) => (
+                <option key={subject} value={subject}>
+                  {subject}
                 </option>
               ))}
             </select>
@@ -232,11 +272,12 @@ function VideoList() {
           </div>
         </div>
         {/* Clear Filters Button */}
-        {(filters.search || filters.course || filters.grade || filters.unit || filters.lesson || filters.module || filters.moduleNumber || filters.status !== 'active') && (
+        {(filters.search || filters.subject || filters.course || filters.grade || filters.unit || filters.lesson || filters.module || filters.moduleNumber || filters.status !== 'active') && (
           <div className="mt-6">
             <button
               onClick={() => setFilters({
                 search: '',
+                subject: '',
                 course: '',
                 grade: '',
                 unit: '',
@@ -413,43 +454,79 @@ function VideoList() {
 
                 {/* Content Section */}
                 <div className="p-5 sm:p-6 bg-white">
-                  {/* Title */}
-                  <h3 className="text-lg sm:text-xl font-bold text-slate-900 mb-2 line-clamp-2 min-h-[3rem] group-hover:text-blue-600 transition-colors leading-tight">
+                  {/* Screen Recording Title */}
+                  <h3 className="text-lg font-bold text-slate-900 mb-3">
                     {video.title || 'Untitled Video'}
                   </h3>
 
-                  {/* Category */}
-                  <div className="mb-4">
-                    <p className="text-sm text-slate-500 font-medium uppercase tracking-wide">
-                      {video.course || 'Video Course'}
-                    </p>
-                  </div>
-
-                  {/* Tags/Pills */}
-                  {(video.grade || video.unit || video.lesson || video.module) && (
-                    <div className="flex flex-wrap gap-2 mb-5">
-                      {video.grade && (
-                        <span className="px-3 py-1.5 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-700 rounded-lg text-xs font-bold border border-blue-300 shadow-sm">
-                          Grade: {video.grade}
-                        </span>
-                      )}
-                      {video.unit && (
-                        <span className="px-3 py-1.5 bg-gradient-to-r from-indigo-50 to-indigo-100 text-indigo-700 rounded-lg text-xs font-bold border border-indigo-300 shadow-sm">
-                          Unit: {video.unit}
-                        </span>
-                      )}
-                      {video.lesson && (
-                        <span className="px-3 py-1.5 bg-gradient-to-r from-green-50 to-green-100 text-green-700 rounded-lg text-xs font-bold border border-green-300 shadow-sm">
-                          Lesson: {video.lesson}
-                        </span>
-                      )}
-                      {video.module && (
-                        <span className="px-3 py-1.5 bg-gradient-to-r from-purple-50 to-purple-100 text-purple-700 rounded-lg text-xs font-bold border border-purple-300 shadow-sm">
-                          Module: {video.module}
-                        </span>
-                      )}
+                  {/* Description */}
+                  {video.description && (
+                    <div className="mb-4">
+                      <div className="text-xs uppercase text-slate-500 mb-2">DESCRIPTION</div>
+                      <div className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg min-h-[2.5rem]">
+                        {video.description}
+                      </div>
                     </div>
                   )}
+
+                  {/* Subject Information - Horizontal Layout */}
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-1 h-6 bg-blue-600 rounded"></div>
+                      <h5 className="text-base font-bold text-slate-900">Subject Information</h5>
+                    </div>
+                    
+                    <div className="grid grid-cols-5 gap-2">
+                      {/* Subject */}
+                      <div>
+                        <div className="text-xs uppercase text-slate-500 mb-1">SUBJECT</div>
+                        <div className="w-full px-2 py-2 text-sm font-bold text-slate-900 bg-blue-50 border border-blue-200 rounded-lg text-center">
+                          {(() => {
+                            const subjectValue = video.subject || video.course || '';
+                            return subjectValue !== null && subjectValue !== undefined && subjectValue !== '' ? String(subjectValue) : '-';
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Grade */}
+                      <div>
+                        <div className="text-xs uppercase text-green-700 mb-1">GRADE</div>
+                        <div className="w-full px-2 py-2 text-sm font-bold text-green-900 bg-green-50 border border-green-200 rounded-lg text-center">
+                          {video.grade !== null && video.grade !== undefined && video.grade !== '' ? video.grade : '-'}
+                        </div>
+                      </div>
+
+                      {/* Unit */}
+                      <div>
+                        <div className="text-xs uppercase text-indigo-700 mb-1">UNIT</div>
+                        <div className="w-full px-2 py-2 text-sm font-bold text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg text-center">
+                          {(() => {
+                            const unitValue = video.unit;
+                            return unitValue !== null && unitValue !== undefined && unitValue !== '' && unitValue !== 0 && unitValue !== '0' ? String(unitValue) : '-';
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Lesson */}
+                      <div>
+                        <div className="text-xs uppercase text-teal-700 mb-1">LESSON</div>
+                        <div className="w-full px-2 py-2 text-sm font-bold text-teal-900 bg-teal-50 border border-teal-200 rounded-lg text-center">
+                          {video.lesson !== null && video.lesson !== undefined && video.lesson !== '' ? video.lesson : '-'}
+                        </div>
+                      </div>
+
+                      {/* Module */}
+                      <div>
+                        <div className="text-xs uppercase text-amber-700 mb-1">MODULE</div>
+                        <div className="w-full px-2 py-2 text-sm font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg text-center">
+                          {(() => {
+                            const moduleValue = video.module;
+                            return moduleValue !== null && moduleValue !== undefined && moduleValue !== '' && moduleValue !== 0 && moduleValue !== '0' ? String(moduleValue) : '-';
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
                   {/* File Size and Date */}
                   <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-600 mb-4 pb-4 border-b-2 border-slate-100">

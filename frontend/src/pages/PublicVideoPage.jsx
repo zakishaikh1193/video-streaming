@@ -299,50 +299,62 @@ function PublicVideoPage() {
             )}
           </div>
 
-          {/* Course Information Section */}
+          {/* Subject Information Section - Horizontal Layout */}
           <div className="mt-6 bg-white rounded-2xl shadow-lg p-6 border border-slate-200 w-full">
-            <h2 className="text-2xl font-bold mb-6 text-slate-900 flex items-center gap-2">
-              <span className="w-1 h-8 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full"></span>
-              Course Information
-            </h2>
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-1 h-6 bg-blue-600 rounded"></div>
+              <h2 className="text-base font-bold text-slate-900">Subject Information</h2>
+            </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-              {video.grade && (
-                <div className="bg-green-50 rounded-xl p-4 border border-green-200">
-                  <span className="text-xs font-semibold text-green-700 uppercase tracking-wide block mb-1">Grade</span>
-                  <span className="text-base font-bold text-slate-900">{video.grade}</span>
+            <div className="grid grid-cols-5 gap-3">
+              {/* Subject */}
+              <div>
+                <div className="text-xs uppercase text-slate-500 mb-1.5">SUBJECT</div>
+                <div className="w-full px-3 py-2.5 text-sm font-bold text-slate-900 bg-blue-50 border border-blue-200 rounded-lg text-center">
+                  {(() => {
+                    const subjectValue = video.subject || video.course || '';
+                    return subjectValue !== null && subjectValue !== undefined && subjectValue !== '' ? String(subjectValue) : '-';
+                  })()}
                 </div>
-              )}
-              {video.lesson && (
-                <div className="bg-teal-50 rounded-xl p-4 border border-teal-200">
-                  <span className="text-xs font-semibold text-teal-700 uppercase tracking-wide block mb-1">Lesson</span>
-                  <span className="text-base font-bold text-slate-900">{video.lesson}</span>
+              </div>
+
+              {/* Grade */}
+              <div>
+                <div className="text-xs uppercase text-green-700 mb-1.5">GRADE</div>
+                <div className="w-full px-3 py-2.5 text-sm font-bold text-green-900 bg-green-50 border border-green-200 rounded-lg text-center">
+                  {video.grade !== null && video.grade !== undefined && video.grade !== '' ? String(video.grade) : '-'}
                 </div>
-              )}
-              {video.course !== null && video.course !== undefined && video.course !== '' && (
-                <div className="bg-sky-50 rounded-xl p-4 border border-sky-200">
-                  <span className="text-xs font-semibold text-sky-700 uppercase tracking-wide block mb-1">Unit</span>
-                  <span className="text-base font-bold text-slate-900">{video.course}</span>
+              </div>
+
+              {/* Unit */}
+              <div>
+                <div className="text-xs uppercase text-indigo-700 mb-1.5">UNIT</div>
+                <div className="w-full px-3 py-2.5 text-sm font-bold text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg text-center">
+                  {(() => {
+                    const unitValue = video.unit;
+                    return unitValue !== null && unitValue !== undefined && unitValue !== '' && unitValue !== 0 && unitValue !== '0' ? String(unitValue) : '-';
+                  })()}
                 </div>
-              )}
-              {video.module !== null && video.module !== undefined && video.module !== '' && (
-                <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-200">
-                  <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wide block mb-1">Module</span>
-                  <span className="text-base font-bold text-slate-900">{String(video.module)}</span>
+              </div>
+
+              {/* Lesson */}
+              <div>
+                <div className="text-xs uppercase text-teal-700 mb-1.5">LESSON</div>
+                <div className="w-full px-3 py-2.5 text-sm font-bold text-teal-900 bg-teal-50 border border-teal-200 rounded-lg text-center">
+                  {video.lesson !== null && video.lesson !== undefined && video.lesson !== '' ? String(video.lesson) : '-'}
                 </div>
-              )}
-              {video.activity && (
-                <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                  <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide block mb-1">Activity</span>
-                  <span className="text-base font-bold text-slate-900">{video.activity}</span>
+              </div>
+
+              {/* Module */}
+              <div>
+                <div className="text-xs uppercase text-amber-700 mb-1.5">MODULE</div>
+                <div className="w-full px-3 py-2.5 text-sm font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg text-center">
+                  {(() => {
+                    const moduleValue = video.module;
+                    return moduleValue !== null && moduleValue !== undefined && moduleValue !== '' && moduleValue !== 0 && moduleValue !== '0' ? String(moduleValue) : '-';
+                  })()}
                 </div>
-              )}
-              {video.topic && (
-                <div className="bg-cyan-50 rounded-xl p-4 border border-cyan-200 md:col-span-2">
-                  <span className="text-xs font-semibold text-cyan-700 uppercase tracking-wide block mb-1">Topic</span>
-                  <span className="text-base font-bold text-slate-900">{video.topic}</span>
-                </div>
-              )}
+              </div>
             </div>
           </div>
 

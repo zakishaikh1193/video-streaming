@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileVideo, Trash2, RefreshCw, CheckCircle, XCircle, AlertCircle, HardDrive, Edit2, Plus, FileText, Download, Upload, Link as LinkIcon, Hash } from 'lucide-react';
+import { FileVideo, Trash2, RefreshCw, CheckCircle, XCircle, AlertCircle, HardDrive, Edit2, Plus, FileText, Download, Upload, Link as LinkIcon, Hash, Search, Filter } from 'lucide-react';
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
 
@@ -9,6 +9,7 @@ function MyStorageManager() {
   
   // State
   const [videos, setVideos] = useState([]);
+  const [filteredVideos, setFilteredVideos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [errorDetails, setErrorDetails] = useState(null);
@@ -19,6 +20,9 @@ function MyStorageManager() {
   const [stagedFiles, setStagedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
+  const [uploadedVideos, setUploadedVideos] = useState([]); // Store successfully uploaded videos
 
   // Load videos from database
   useEffect(() => {
@@ -62,6 +66,7 @@ function MyStorageManager() {
       });
       
       setVideos(videosData);
+      setFilteredVideos(videosData);
       if (videosData.length === 0) {
         setError('No videos found. Upload some videos first.');
       }
@@ -72,6 +77,44 @@ function MyStorageManager() {
       setLoading(false);
     }
   };
+
+  // Filter videos based on search query
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredVideos(videos);
+      return;
+    }
+
+    const query = searchQuery.toLowerCase().trim();
+    const filtered = videos.filter(video => {
+      const course = (video.course || '').toLowerCase();
+      const grade = (video.grade || '').toLowerCase();
+      const unit = (video.unit || '').toLowerCase();
+      const lesson = (video.lesson || '').toLowerCase();
+      const module = (video.module || '').toLowerCase();
+      const status = (video.status || '').toLowerCase();
+      const title = (video.title || '').toLowerCase();
+      const videoId = (video.video_id || '').toLowerCase();
+
+      // Check if query matches any field
+      return course.includes(query) ||
+             grade.includes(query) ||
+             unit.includes(query) ||
+             lesson.includes(query) ||
+             module.includes(query) ||
+             status.includes(query) ||
+             title.includes(query) ||
+             videoId.includes(query) ||
+             // Support multi-word queries like "course faith"
+             (query.includes('course') && course.includes(query.replace('course', '').trim())) ||
+             (query.includes('grade') && grade.includes(query.replace('grade', '').trim())) ||
+             (query.includes('unit') && unit.includes(query.replace('unit', '').trim())) ||
+             (query.includes('lesson') && lesson.includes(query.replace('lesson', '').trim())) ||
+             (query.includes('module') && module.includes(query.replace('module', '').trim()));
+    });
+
+    setFilteredVideos(filtered);
+  }, [searchQuery, videos]);
 
   // Handle multi-file select from PC
   const handleFileSelect = (e) => {
@@ -105,11 +148,13 @@ function MyStorageManager() {
         plannedPath: `upload/${videoId}${ext}`,
         previewUrl: `${backendBase}/api/s/${videoId}`,
         title: file.name.replace(/\.[^/.]+$/, ''),
+        subject: '',
+        course: '', // Keep for backward compatibility
         grade: '',
-        lesson: '',
         unit: '',
-        course: '',
+        lesson: '',
         module: '',
+        status: 'active',
         description: ''
       };
     });
@@ -139,11 +184,42 @@ function MyStorageManager() {
       return;
     }
 
+    // Validate required fields for each staged file
+    const validationErrors = [];
+    stagedFiles.forEach((item, index) => {
+      if (!item.subject && !item.course || (!item.subject?.trim() && !item.course?.trim())) {
+        validationErrors.push(`File ${index + 1} (${item.file.name}): Subject is required`);
+      }
+      if (!item.grade || !item.grade.trim()) {
+        validationErrors.push(`File ${index + 1} (${item.file.name}): Grade is required`);
+      }
+      if (!item.unit || !item.unit.trim()) {
+        validationErrors.push(`File ${index + 1} (${item.file.name}): Unit is required`);
+      }
+      if (!item.lesson || !item.lesson.trim()) {
+        validationErrors.push(`File ${index + 1} (${item.file.name}): Lesson is required`);
+      }
+      if (!item.module || !item.module.trim()) {
+        validationErrors.push(`File ${index + 1} (${item.file.name}): Module is required`);
+      }
+      if (!item.status || !item.status.trim()) {
+        validationErrors.push(`File ${index + 1} (${item.file.name}): Status is required`);
+      }
+    });
+
+    if (validationErrors.length > 0) {
+      setError('Please fill in all required fields:\n' + validationErrors.join('\n'));
+      return;
+    }
+
     setUploading(true);
     setUploadProgress(0);
     setError('');
     setErrorDetails(null);
     setSuccess('');
+    setUploadedVideos([]); // Clear previous uploaded videos
+
+    let successfullyUploaded = []; // Declare outside try block so it's accessible
 
     try {
       for (let i = 0; i < stagedFiles.length; i++) {
@@ -153,15 +229,73 @@ function MyStorageManager() {
         formData.append('title', item.title || item.file.name);
         formData.append('videoId', item.videoId || '');
         formData.append('plannedPath', item.plannedPath || '');
-        formData.append('grade', item.grade || '');
-        formData.append('lesson', item.lesson || '');
-        formData.append('module', item.module || '');
-        formData.append('description', item.description || '');
-        formData.append('course', item.course || item.unit || ''); // use course field, fallback to unit
+        
+        // Ensure all fields are sent, even if empty - use explicit values
+        const subjectValue = (item.subject || item.course) && (item.subject || item.course).trim() !== '' ? (item.subject || item.course).trim() : '';
+        const gradeValue = item.grade && item.grade.toString().trim() !== '' ? item.grade.toString().trim() : '';
+        const unitValue = item.unit && item.unit.toString().trim() !== '' ? item.unit.toString().trim() : '';
+        const lessonValue = item.lesson && item.lesson.toString().trim() !== '' ? item.lesson.toString().trim() : '';
+        const moduleValue = item.module && item.module.toString().trim() !== '' ? item.module.toString().trim() : '';
+        const descriptionValue = item.description && item.description.trim() !== '' ? item.description.trim() : '';
+        const statusValue = item.status && item.status.trim() !== '' ? item.status.trim() : 'active';
+        
+        formData.append('subject', subjectValue);
+        formData.append('course', subjectValue); // Keep for backward compatibility
+        formData.append('grade', gradeValue);
+        formData.append('unit', unitValue);
+        formData.append('lesson', lessonValue);
+        formData.append('module', moduleValue);
+        formData.append('description', descriptionValue);
+        formData.append('status', statusValue);
+        
+        // Log what we're sending
+        console.log('[CloudflareResourceManager] Sending form data:', {
+          subject: subjectValue,
+          course: subjectValue, // Backward compatibility
+          grade: gradeValue,
+          unit: unitValue,
+          lesson: lessonValue,
+          module: moduleValue,
+          description: descriptionValue,
+          status: statusValue,
+          title: item.title || item.file.name
+        });
 
         try {
-          await api.post('/videos/upload', formData, {
+          const response = await api.post('/videos/upload', formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
+          });
+
+          // Log the response to verify subject information is being returned
+          console.log('[CloudflareResourceManager] Upload response:', {
+            video_id: response.data?.video?.video_id,
+            subject: response.data?.video?.subject,
+            course: response.data?.video?.course || response.data?.video?.subject, // Backward compatibility
+            grade: response.data?.video?.grade,
+            unit: response.data?.video?.unit,
+            lesson: response.data?.video?.lesson,
+            module: response.data?.video?.module,
+            description: response.data?.video?.description
+          });
+
+          // Store successfully uploaded video data with all subject information from backend response
+          // Use backend response data first (has actual saved values from database), fallback to item data
+          const videoResponse = response.data?.video || {};
+          successfullyUploaded.push({
+            ...item,
+            video_id: videoResponse.video_id || item.videoId,
+            id: videoResponse.id || null,
+            // Use backend response data (from database) - this ensures we get the actual saved values
+            // Use null/undefined check to preserve empty strings if that's what was saved
+            subject: videoResponse.subject !== null && videoResponse.subject !== undefined ? videoResponse.subject : (item.subject || item.course || ''),
+            course: videoResponse.subject !== null && videoResponse.subject !== undefined ? videoResponse.subject : (videoResponse.course !== null && videoResponse.course !== undefined ? videoResponse.course : (item.subject || item.course || '')), // Backward compatibility
+            grade: videoResponse.grade !== null && videoResponse.grade !== undefined ? videoResponse.grade : (item.grade || ''),
+            unit: videoResponse.unit !== null && videoResponse.unit !== undefined ? videoResponse.unit : (item.unit || ''),
+            lesson: videoResponse.lesson !== null && videoResponse.lesson !== undefined ? videoResponse.lesson : (item.lesson || ''),
+            module: videoResponse.module !== null && videoResponse.module !== undefined ? videoResponse.module : (item.module || ''),
+            status: videoResponse.status || item.status || 'active',
+            description: videoResponse.description !== null && videoResponse.description !== undefined ? videoResponse.description : (item.description || ''),
+            title: videoResponse.title || item.title || item.file?.name?.replace(/\.[^/.]+$/, '') || 'Screen Recording'
           });
 
           const percent = Math.round(((i + 1) / stagedFiles.length) * 100);
@@ -179,7 +313,8 @@ function MyStorageManager() {
             lesson: item.lesson || '',
             module: item.module || '',
             unit: item.unit || '',
-            course: item.course || '',
+            subject: item.subject || item.course || '',
+            course: item.subject || item.course || '', // Backward compatibility
             description: item.description || '',
             error: {
               message: uploadErr.message || 'Unknown error',
@@ -219,9 +354,16 @@ function MyStorageManager() {
         }
       }
 
-      setSuccess(`Uploaded ${stagedFiles.length} video(s) successfully`);
-      clearStaged();
-      loadVideos();
+      // Only show success if we have successfully uploaded videos
+      if (successfullyUploaded.length > 0) {
+        setSuccess(`Uploaded ${successfullyUploaded.length} video(s) successfully`);
+        setUploadedVideos(successfullyUploaded); // Store uploaded videos to display
+        clearStaged();
+        loadVideos();
+      } else {
+        // If no videos were successfully uploaded, show error
+        setError('No videos were uploaded successfully. Please check the error details above.');
+      }
     } catch (err) {
       // This catch handles any other errors
       if (!errorDetails) {
@@ -340,7 +482,8 @@ function MyStorageManager() {
       unit: video.unit || '',
       module: video.module || '',
       title: video.title || '',
-      description: video.description || ''
+      description: video.description || '',
+      status: video.status || 'active'
     });
   };
 
@@ -541,7 +684,7 @@ function MyStorageManager() {
                   <button
                   onClick={() => {
                     // Generate CSV from staged files client-side
-                    const headers = ['ID', 'Title', 'Planned Path', 'Preview URL', 'Course', 'Grade', 'Unit', 'Lesson', 'Module', 'Description'];
+                    const headers = ['ID', 'Title', 'Planned Path', 'Preview URL', 'Subject', 'Grade', 'Unit', 'Lesson', 'Module', 'Description'];
                     const rows = stagedFiles.map((f) => [
                       f.videoId || '',
                       f.title || f.file.name.replace(/\.[^/.]+$/, ''),
@@ -602,11 +745,12 @@ function MyStorageManager() {
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Title</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Planned URL</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Planned Path</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Course</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Subject</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Grade</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Unit</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Lesson</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Module</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Description</th>
                     <th className="px-6 py-3 text-center text-xs font-semibold text-slate-700 uppercase tracking-wider">Actions</th>
                   </tr>
@@ -640,10 +784,13 @@ function MyStorageManager() {
                       <td className="px-6 py-3">
                         <input
                           type="text"
-                          value={item.course || ''}
-                          onChange={(e) => updateStagedField(item.id, 'course', e.target.value)}
+                          value={item.subject || item.course || ''}
+                          onChange={(e) => {
+                            updateStagedField(item.id, 'subject', e.target.value);
+                            updateStagedField(item.id, 'course', e.target.value); // Keep for backward compatibility
+                          }}
                           className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Course name"
+                          placeholder="Subject name"
                         />
                       </td>
                       <td className="px-6 py-3">
@@ -676,7 +823,19 @@ function MyStorageManager() {
                           value={item.module}
                           onChange={(e) => updateStagedField(item.id, 'module', e.target.value)}
                           className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Module"
                         />
+                      </td>
+                      <td className="px-6 py-3">
+                        <select
+                          value={item.status || 'active'}
+                          onChange={(e) => updateStagedField(item.id, 'status', e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                          <option value="deleted">Deleted</option>
+                        </select>
                       </td>
                       <td className="px-6 py-3">
                         <textarea
@@ -706,248 +865,106 @@ function MyStorageManager() {
               )}
 
         {success && (
-          <div className="mb-6 p-5 bg-green-50 border-l-4 border-green-500 rounded-xl text-green-700 flex items-start gap-3 shadow-sm">
-            <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
-            <div className="flex-1 font-medium">{success}</div>
-            <button onClick={() => setSuccess('')} className="text-green-500 hover:text-green-700 transition-colors">
-              <XCircle className="w-5 h-5" />
-                  </button>
-              </div>
-        )}
+          <>
+            <div className="mb-6 p-5 bg-green-50 border-l-4 border-green-500 rounded-xl text-green-700 flex items-start gap-3 shadow-sm">
+              <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 font-medium">{success}</div>
+              <button onClick={() => { setSuccess(''); setUploadedVideos([]); }} className="text-green-500 hover:text-green-700 transition-colors">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
 
-        {/* Videos Table */}
-        <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-          {/* Table Header with Actions */}
-          <div className="p-6 border-b border-slate-200 bg-gradient-to-r from-teal-50 to-cyan-50">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-3">
-                  <div className="p-2 bg-teal-100 rounded-xl">
-                  <FileVideo className="w-5 h-5 text-teal-600" />
+            {/* Uploaded Videos - Course Information Horizontal Container */}
+            {uploadedVideos.length > 0 && (
+              <div className="mb-6 bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-green-100 rounded-xl">
+                    <CheckCircle className="w-5 h-5 text-green-600" />
                   </div>
-                Videos
-                  <span className="ml-2 px-3 py-1 bg-teal-100 text-teal-700 rounded-full text-sm font-semibold">
-                  {videos.length}
-                  </span>
-                </h2>
-                <div className="flex items-center gap-2 flex-wrap">
-                {selectedVideos.length > 0 && (
-                    <button
-                    onClick={handleDeleteSelected}
-                      className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all duration-200 font-semibold shadow-md hover:shadow-lg hover:scale-[1.02]"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    Delete ({selectedVideos.length})
-                    </button>
-                  )}
+                  Uploaded Videos - Course Information
+                </h3>
                 
+                <div className="space-y-4">
+                  {uploadedVideos.map((item) => (
+                    <div key={item.id || item.videoId} className="bg-white rounded-xl border-2 border-slate-200 shadow-sm p-5">
+                      {/* Screen Recording Title */}
+                      <div className="mb-4">
+                        <h4 className="text-lg font-bold text-slate-900 mb-3">
+                          {item.title || item.file?.name?.replace(/\.[^/.]+$/, '') || 'Screen Recording'}
+                        </h4>
+                        <div className="mb-4">
+                          <div className="text-xs uppercase text-slate-500 mb-2">DESCRIPTION</div>
+                          <div className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg min-h-[2.5rem]">
+                            {item.description || '-'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Course Information - Horizontal Layout */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-4">
+                          <div className="w-1 h-6 bg-blue-600 rounded"></div>
+                          <h5 className="text-base font-bold text-slate-900">Course Information</h5>
+                        </div>
+                        
+                        <div className="grid grid-cols-5 gap-3">
+                          {/* Subject */}
+                          <div>
+                            <div className="text-xs uppercase text-slate-500 mb-1.5">SUBJECT</div>
+                            <div className="w-full px-3 py-2.5 text-sm font-bold text-slate-900 bg-blue-50 border border-blue-200 rounded-lg text-center">
+                              {(() => {
+                                const subjectValue = item.subject || item.course || '';
+                                return subjectValue !== null && subjectValue !== undefined && subjectValue !== '' ? String(subjectValue) : '-';
+                              })()}
+                            </div>
+                          </div>
+
+                          {/* Grade */}
+                          <div>
+                            <div className="text-xs uppercase text-green-700 mb-1.5">GRADE</div>
+                            <div className="w-full px-3 py-2.5 text-sm font-bold text-green-900 bg-green-50 border border-green-200 rounded-lg text-center">
+                              {item.grade !== null && item.grade !== undefined && item.grade !== '' ? String(item.grade) : '-'}
+                            </div>
+                          </div>
+
+                          {/* Unit */}
+                          <div>
+                            <div className="text-xs uppercase text-indigo-700 mb-1.5">UNIT</div>
+                            <div className="w-full px-3 py-2.5 text-sm font-bold text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg text-center">
+                              {(() => {
+                                const unitValue = item.unit;
+                                return unitValue !== null && unitValue !== undefined && unitValue !== '' && unitValue !== 0 && unitValue !== '0' ? String(unitValue) : '-';
+                              })()}
+                            </div>
+                          </div>
+
+                          {/* Lesson */}
+                          <div>
+                            <div className="text-xs uppercase text-teal-700 mb-1.5">LESSON</div>
+                            <div className="w-full px-3 py-2.5 text-sm font-bold text-teal-900 bg-teal-50 border border-teal-200 rounded-lg text-center">
+                              {item.lesson !== null && item.lesson !== undefined && item.lesson !== '' ? String(item.lesson) : '-'}
+                            </div>
+                          </div>
+
+                          {/* Module */}
+                          <div>
+                            <div className="text-xs uppercase text-amber-700 mb-1.5">MODULE</div>
+                            <div className="w-full px-3 py-2.5 text-sm font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg text-center">
+                              {(() => {
+                                const moduleValue = item.module;
+                                return moduleValue !== null && moduleValue !== undefined && moduleValue !== '' && moduleValue !== 0 && moduleValue !== '0' ? String(moduleValue) : '-';
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            {videos.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                  checked={selectedVideos.length === videos.length && videos.length > 0}
-                  onChange={handleSelectAll}
-                    className="w-4 h-4 text-teal-600 border-slate-300 rounded focus:ring-teal-500"
-                  />
-                  <label className="text-sm text-slate-700 cursor-pointer font-medium">
-                  {selectedVideos.length === videos.length && videos.length > 0 ? 'Deselect All' : 'Select All'}
-                  </label>
-                {selectedVideos.length > 0 && (
-                    <span className="text-sm text-slate-600 ml-2">
-                    ({selectedVideos.length} selected)
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
-          {/* Table Content */}
-          <div className="overflow-x-auto">
-              {loading ? (
-                <div className="flex items-center justify-center py-16">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
-                </div>
-            ) : videos.length === 0 ? (
-              <div className="text-center py-16 bg-slate-50 border-2 border-dashed border-slate-200 m-6 rounded-xl">
-                <FileVideo className="w-16 h-16 text-slate-400 mx-auto mb-4" />
-                <div className="text-slate-600 font-semibold mb-2">No videos found</div>
-                <div className="text-slate-500 text-sm mb-4">Upload videos to see them here</div>
-                
-                </div>
-              ) : (
-                  <table className="min-w-full">
-                    <thead className="bg-gradient-to-r from-slate-50 to-teal-50 sticky top-0 z-10 shadow-sm">
-                      <tr>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider w-12">
-                          <input
-                            type="checkbox"
-                        checked={selectedVideos.length === videos.length && videos.length > 0}
-                        onChange={handleSelectAll}
-                            className="w-4 h-4 text-teal-600 border-slate-300 rounded focus:ring-teal-500"
-                          />
-                        </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">ID</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Title</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Course</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Grade</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Unit</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Lesson</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Module</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">File Path</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Size</th>
-                    <th className="px-6 py-4 text-center text-xs font-semibold text-slate-700 uppercase tracking-wider">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-slate-200">
-                  {videos.map((video, index) => {
-                    const isSelected = selectedVideos.includes(video.id);
-                    const isEditing = editingVideo === video.id;
-                          return (
-                      <tr key={video.id} className={`transition-colors duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'} ${isSelected ? 'bg-blue-50' : ''} hover:bg-blue-50/50`}>
-                            <td className="px-6 py-4">
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                            onChange={() => handleSelectVideo(video.id)}
-                                className="w-4 h-4 text-teal-600 border-slate-300 rounded focus:ring-teal-500"
-                              />
-                            </td>
-                            <td className="px-6 py-4">
-                          <code className="text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded-lg font-mono">
-                            {video.video_id}
-                          </code>
-                        </td>
-                        <td className="px-6 py-4">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={editFormData.title || ''}
-                              onChange={(e) => setEditFormData({ ...editFormData, title: e.target.value })}
-                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          ) : (
-                            <div className="text-sm font-semibold text-slate-900">{video.title || video.video_id}</div>
-                          )}
-                            </td>
-                            <td className="px-6 py-4">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={editFormData.course || ''}
-                              onChange={(e) => setEditFormData({ ...editFormData, course: e.target.value })}
-                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          ) : (
-                            <div className="text-sm text-slate-700 font-semibold">{video.course || (video.course === null || video.course === undefined ? '-' : '')}</div>
-                          )}
-                        </td>
-                            <td className="px-6 py-4">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={editFormData.grade || ''}
-                              onChange={(e) => setEditFormData({ ...editFormData, grade: e.target.value })}
-                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          ) : (
-                            <div className="text-sm text-slate-700">{video.grade || (video.grade === null || video.grade === undefined ? '-' : '')}</div>
-                          )}
-                            </td>
-                        <td className="px-6 py-4">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={editFormData.unit || ''}
-                              onChange={(e) => setEditFormData({ ...editFormData, unit: e.target.value })}
-                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          ) : (
-                            <div className="text-sm text-slate-700 font-semibold">{video.unit || (video.unit === null || video.unit === undefined ? '-' : '')}</div>
-                          )}
-                        </td>
-                            <td className="px-6 py-4">
-                          {isEditing ? (
-                                    <input
-                                      type="text"
-                              value={editFormData.lesson || ''}
-                              onChange={(e) => setEditFormData({ ...editFormData, lesson: e.target.value })}
-                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          ) : (
-                            <div className="text-sm text-slate-700">{video.lesson || (video.lesson === null || video.lesson === undefined ? '-' : '')}</div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={editFormData.module || ''}
-                              onChange={(e) => setEditFormData({ ...editFormData, module: e.target.value })}
-                              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          ) : (
-                            <div className="text-sm text-slate-700 font-semibold">{video.module || (video.module === null || video.module === undefined ? '-' : '')}</div>
-                              )}
-                            </td>
-                            <td className="px-6 py-4">
-                          <div className="text-xs text-slate-600 font-mono bg-slate-50 px-3 py-2 rounded-lg truncate max-w-xs" title={video.file_path || 'N/A'}>
-                            {video.file_path || 'N/A'}
-                              </div>
-                            </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-slate-700 font-semibold">{formatFileSize(video.size)}</div>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              {isEditing ? (
-                                <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    onClick={() => handleSaveEdit(video.id)}
-                                    className="text-green-600 hover:text-green-700 transition-all duration-200 p-2 hover:bg-green-50 rounded-xl hover:scale-110"
-                                    title="Save"
-                                  >
-                                    <CheckCircle className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={handleCancelEdit}
-                                    className="text-slate-600 hover:text-slate-700 transition-all duration-200 p-2 hover:bg-slate-50 rounded-xl hover:scale-110"
-                                    title="Cancel"
-                                  >
-                                    <XCircle className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col items-center gap-1">
-                                  {video.status === 'active' ? (
-                                    video.isDuplicate ? (
-                                      <span className="px-2 py-1 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg">
-                                        Duplicate ({video.duplicateCount})
-                                      </span>
-                                    ) : (
-                                      <span className="px-2 py-1 text-xs font-semibold bg-green-100 text-green-700 rounded-lg">
-                                        Active
-                                      </span>
-                                    )
-                                  ) : video.status === 'failed' || !video.file_path ? (
-                                    <span className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-700 rounded-lg">
-                                      Failed
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-1 text-xs font-semibold bg-slate-100 text-slate-700 rounded-lg">
-                                      {video.status || 'Unknown'}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-              )}
-            </div>
-          </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

@@ -37,6 +37,9 @@ router.use((req, res, next) => {
 router.get('/', videoController.getAllVideos);
 router.get('/filters', videoController.getFilterValues);
 
+// Increment video views (public endpoint - no auth required)
+router.post('/:videoId/increment-views', videoController.incrementVideoViews);
+
 // Public API to get redirect info by slug (for frontend short URL handling)
 router.get('/redirect-info/:slug', async (req, res) => {
   try {
@@ -315,6 +318,9 @@ router.get('/:videoId/stream', async (req, res, next) => {
   }
 });
 
+router.get('/by-id/:id', authenticateToken, videoController.getVideoById);
+router.get('/diagnostic/:id', authenticateToken, videoController.getVideoMetadataDiagnostic);
+router.post('/diagnostic/:id/quick-fix', authenticateToken, videoController.quickFixVideoMetadata);
 router.put('/:id', authenticateToken, videoController.updateVideo);
 router.delete('/:id', authenticateToken, videoController.deleteVideo);
 router.get('/:videoId/versions', authenticateToken, videoController.getVideoVersions);

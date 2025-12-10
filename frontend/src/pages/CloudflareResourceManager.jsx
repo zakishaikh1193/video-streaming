@@ -230,26 +230,46 @@ function MyStorageManager() {
         formData.append('videoId', item.videoId || '');
         formData.append('plannedPath', item.plannedPath || '');
         
-        // Ensure all fields are sent, even if empty - use explicit values
-        const subjectValue = (item.subject || item.course) && (item.subject || item.course).trim() !== '' ? (item.subject || item.course).trim() : '';
-        const gradeValue = item.grade && item.grade.toString().trim() !== '' ? item.grade.toString().trim() : '';
-        const unitValue = item.unit && item.unit.toString().trim() !== '' ? item.unit.toString().trim() : '';
-        const lessonValue = item.lesson && item.lesson.toString().trim() !== '' ? item.lesson.toString().trim() : '';
-        const moduleValue = item.module && item.module.toString().trim() !== '' ? item.module.toString().trim() : '';
-        const descriptionValue = item.description && item.description.trim() !== '' ? item.description.trim() : '';
+        // CRITICAL: Ensure all fields are sent with actual values
+        // Convert empty strings to null for database consistency, but preserve actual values
+        const normalizeValue = (val) => {
+          if (!val || (typeof val === 'string' && val.trim() === '')) return null;
+          return String(val).trim();
+        };
+        
+        // Get subject value - prefer subject over course
+        const subjectValue = normalizeValue(item.subject || item.course);
+        const gradeValue = normalizeValue(item.grade);
+        const unitValue = normalizeValue(item.unit);
+        const lessonValue = normalizeValue(item.lesson);
+        const moduleValue = normalizeValue(item.module);
+        const descriptionValue = normalizeValue(item.description);
         const statusValue = item.status && item.status.trim() !== '' ? item.status.trim() : 'active';
         
-        formData.append('subject', subjectValue);
-        formData.append('course', subjectValue); // Keep for backward compatibility
-        formData.append('grade', gradeValue);
-        formData.append('unit', unitValue);
-        formData.append('lesson', lessonValue);
-        formData.append('module', moduleValue);
-        formData.append('description', descriptionValue);
+        // CRITICAL: Always send these fields, even if null (so backend knows to set them)
+        // Use null instead of empty string for database consistency
+        formData.append('subject', subjectValue || '');
+        formData.append('course', subjectValue || ''); // Keep for backward compatibility
+        formData.append('grade', gradeValue || '');
+        formData.append('unit', unitValue || '');
+        formData.append('lesson', lessonValue || '');
+        formData.append('module', moduleValue || '');
+        formData.append('description', descriptionValue || '');
         formData.append('status', statusValue);
         
-        // Log what we're sending
-        console.log('[CloudflareResourceManager] Sending form data:', {
+        // Log what we're sending - show both raw and processed values
+        console.log('[CloudflareResourceManager] ===== SENDING FORM DATA =====');
+        console.log('[CloudflareResourceManager] Raw item values:', {
+          subject: item.subject,
+          course: item.course,
+          grade: item.grade,
+          unit: item.unit,
+          lesson: item.lesson,
+          module: item.module,
+          description: item.description,
+          status: item.status
+        });
+        console.log('[CloudflareResourceManager] Processed values being sent:', {
           subject: subjectValue,
           course: subjectValue, // Backward compatibility
           grade: gradeValue,
@@ -260,6 +280,7 @@ function MyStorageManager() {
           status: statusValue,
           title: item.title || item.file.name
         });
+        console.log('[CloudflareResourceManager] =============================');
 
         try {
           const response = await api.post('/videos/upload', formData, {

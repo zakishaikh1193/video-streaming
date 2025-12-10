@@ -11,6 +11,81 @@ import * as qrCodeService from '../services/qrCodeService.js';
 import { ensureDirectoryExists, getFileSize } from '../utils/fileUtils.js';
 import { getBaseUrl } from '../utils/urlHelper.js';
 
+// Utility: check if a column exists in the videos table
+async function columnExists(columnName) {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) as count
+       FROM information_schema.columns
+       WHERE table_schema = DATABASE()
+         AND table_name = 'videos'
+         AND column_name = ?`,
+      [columnName]
+    );
+    return rows[0]?.count > 0;
+  } catch (err) {
+    console.warn(`[columnExists] Failed to check column ${columnName}:`, err.message);
+    return false;
+  }
+}
+
+// Ensure required columns exist for QR code listing
+async function ensureQrColumns() {
+  // NOTE: 'course' and 'activity' columns are removed from the new schema
+  const columns = [
+    { name: 'subject', definition: "ALTER TABLE videos ADD COLUMN subject VARCHAR(255) NULL AFTER id" },
+    { name: 'grade', definition: "ALTER TABLE videos ADD COLUMN grade VARCHAR(255) NULL" },
+    { name: 'lesson', definition: "ALTER TABLE videos ADD COLUMN lesson VARCHAR(255) NULL" },
+    { name: 'module', definition: "ALTER TABLE videos ADD COLUMN module VARCHAR(255) NULL" },
+    { name: 'topic', definition: "ALTER TABLE videos ADD COLUMN topic VARCHAR(255) NULL" },
+    { name: 'qr_url', definition: "ALTER TABLE videos ADD COLUMN qr_url VARCHAR(500) NULL" },
+    { name: 'redirect_slug', definition: "ALTER TABLE videos ADD COLUMN redirect_slug VARCHAR(100) NULL" },
+    { name: 'streaming_url', definition: "ALTER TABLE videos ADD COLUMN streaming_url VARCHAR(500) NULL" }
+  ];
+
+  for (const col of columns) {
+    const exists = await columnExists(col.name);
+    if (!exists) {
+      try {
+        await pool.execute(col.definition);
+        console.log(`[ensureQrColumns] Added missing column: ${col.name}`);
+      } catch (err) {
+        // Ignore duplicate/exists errors; rethrow others
+        if (err.code !== 'ER_DUP_FIELDNAME' && err.code !== 'ER_TOO_MANY_KEY_PARTS') {
+          console.warn(`[ensureQrColumns] Could not add column ${col.name}:`, err.message);
+        }
+      }
+    }
+  }
+}
+
+// Ensure core video metadata columns exist (subject/course/grade/unit/lesson/module/activity/topic)
+async function ensureVideoColumns() {
+  // NOTE: 'course' and 'activity' columns are removed from the new schema
+  const columns = [
+    { name: 'subject', definition: "ALTER TABLE videos ADD COLUMN subject VARCHAR(255) NULL AFTER id" },
+    { name: 'grade', definition: "ALTER TABLE videos ADD COLUMN grade VARCHAR(255) NULL" },
+    { name: 'unit', definition: "ALTER TABLE videos ADD COLUMN unit VARCHAR(255) NULL" },
+    { name: 'lesson', definition: "ALTER TABLE videos ADD COLUMN lesson VARCHAR(255) NULL" },
+    { name: 'module', definition: "ALTER TABLE videos ADD COLUMN module VARCHAR(255) NULL" },
+    { name: 'topic', definition: "ALTER TABLE videos ADD COLUMN topic VARCHAR(255) NULL" }
+  ];
+
+  for (const col of columns) {
+    const exists = await columnExists(col.name);
+    if (!exists) {
+      try {
+        await pool.execute(col.definition);
+        console.log(`[ensureVideoColumns] Added missing column: ${col.name}`);
+      } catch (err) {
+        if (err.code !== 'ER_DUP_FIELDNAME') {
+          console.warn(`[ensureVideoColumns] Could not add column ${col.name}:`, err.message);
+        }
+      }
+    }
+  }
+}
+
 // Self-contained generateUniqueShortId function - no external module imports needed
 // This completely avoids any module loading issues
 async function generateUniqueShortId(maxRetries = 10) {
@@ -351,12 +426,49 @@ export async function getAllVideos(req, res) {
       });
     }
     
-    // Ensure all videos have subject field explicitly set (for backward compatibility)
-    const videosWithSubject = videos.map(video => ({
-      ...video,
-      subject: video.subject !== undefined ? video.subject : (video.course !== undefined ? video.course : null),
-      course: video.subject !== undefined ? video.subject : (video.course !== undefined ? video.course : null) // Backward compatibility
-    }));
+    // Ensure all videos have subject and module fields explicitly set
+    // CRITICAL: Preserve actual values including "0", "1", etc.
+    const videosWithSubject = videos.map(video => {
+      // Determine subject value (course column removed, only use subject)
+      // Preserve actual values including "0", "1", etc.
+      const subjectValue = (video.subject !== undefined && video.subject !== null && String(video.subject).trim() !== '') 
+        ? String(video.subject).trim() 
+        : null;
+      
+      // Preserve module value
+      const moduleValue = (video.module !== undefined && video.module !== null && String(video.module).trim() !== '') 
+        ? String(video.module).trim() 
+        : null;
+      
+      return {
+        ...video,
+        subject: subjectValue,
+        course: subjectValue, // Backward compatibility - map to subject (course column removed)
+        module: moduleValue, // Explicitly set module to ensure it's included
+        unit: video.unit !== undefined && video.unit !== null && String(video.unit).trim() !== '' ? String(video.unit).trim() : null,
+        grade: video.grade !== undefined && video.grade !== null && String(video.grade).trim() !== '' ? String(video.grade).trim() : null,
+        lesson: video.lesson !== undefined && video.lesson !== null && String(video.lesson).trim() !== '' ? String(video.lesson).trim() : null
+      };
+    });
+    
+    // Log a sample to verify mapping
+    if (videosWithSubject.length > 0) {
+      const sample = videosWithSubject[0];
+      console.log('[getAllVideos Controller] ===== FINAL RESPONSE TO FRONTEND =====');
+      console.log('[getAllVideos Controller] After mapping - sample video:', {
+        id: sample.id,
+        video_id: sample.video_id,
+        subject: sample.subject,
+        course: sample.course,
+        grade: sample.grade,
+        unit: sample.unit,
+        lesson: sample.lesson,
+        module: sample.module,
+        subjectType: typeof sample.subject,
+        moduleType: typeof sample.module
+      });
+      console.log('[getAllVideos Controller] =====================================');
+    }
     
     res.json(videosWithSubject);
   } catch (error) {
@@ -422,6 +534,7 @@ export async function uploadVideo(req, res) {
     // Get form data
     const {
       course,
+      subject,
       grade,
       unit,
       lesson,
@@ -436,21 +549,42 @@ export async function uploadVideo(req, res) {
       plannedPath
     } = req.body;
 
-    // Log received form data to verify course, unit, and module are being received
-    console.log('[Upload Video] Extracted form data:', {
-      course: course !== undefined ? `"${course}"` : 'undefined',
-      grade: grade !== undefined ? `"${grade}"` : 'undefined',
-      unit: unit !== undefined ? `"${unit}"` : 'undefined',
-      lesson: lesson !== undefined ? `"${lesson}"` : 'undefined',
-      module: module !== undefined ? `"${module}"` : 'undefined',
-      title: title !== undefined ? `"${title}"` : 'undefined',
-      description: description !== undefined ? `"${description}"` : 'undefined',
-      status: status !== undefined ? `"${status}"` : 'undefined',
-      subjectType: typeof subjectValue,
+    // Use subject if provided, otherwise fall back to course (for backward compatibility)
+    // IMPORTANT: Preserve values even if they're empty strings - they might be valid inputs
+    const subjectValue = (subject !== undefined && subject !== null && subject !== '') 
+      ? String(subject).trim() 
+      : ((course !== undefined && course !== null && course !== '') 
+          ? String(course).trim() 
+          : null);
+
+    // Log received form data to verify all values are being received
+    console.log('[Upload Video] ===== RAW FORM DATA RECEIVED =====');
+    console.log('[Upload Video] Extracted form data (RAW):', {
+      course: course,
+      subject: subject,
+      subjectValue: subjectValue,
+      grade: grade,
+      unit: unit,
+      lesson: lesson,
+      module: module,
+      title: title,
+      description: description,
+      status: status,
+      subjectType: typeof subject,
       courseType: typeof course,
       gradeType: typeof grade,
-      unitType: typeof unit
+      unitType: typeof unit,
+      moduleType: typeof module,
+      allBodyKeys: Object.keys(req.body),
+      bodyValues: {
+        subject: req.body.subject,
+        module: req.body.module,
+        grade: req.body.grade,
+        unit: req.body.unit,
+        lesson: req.body.lesson
+      }
     });
+    console.log('[Upload Video] ====================================');
 
     // Check for duplicate title - prevent upload if title already exists
     if (title && title.trim() !== '') {
@@ -572,19 +706,48 @@ export async function uploadVideo(req, res) {
     console.log(`[Upload Video] Streaming URL: ${streamingUrl}`);
 
     // Create video record in database (with retry on duplicate video_id)
-    // Preserve empty strings - don't convert to null if they're intentionally empty
+    // CRITICAL: Preserve actual values - convert empty strings to null, but keep real values
+    // Helper function to safely convert to string and preserve non-empty values
+    const safeStringValue = (val) => {
+      // If value is undefined or null, return null
+      if (val === undefined || val === null) return null;
+      // Convert to string and trim
+      const str = String(val).trim();
+      // Empty strings become null, but actual values like "1", "Math", etc. are preserved
+      return str !== '' ? str : null;
+    };
+    
+    // Log raw received values BEFORE any processing
+    console.log('[Upload Video] ===== RAW VALUES FROM FORM =====');
+    console.log('[Upload Video] RAW received values from form:', {
+      subject: subjectValue,
+      grade: grade,
+      unit: unit,
+      lesson: lesson,
+      module: module,
+      status: status,
+      description: description,
+      subjectType: typeof subjectValue,
+      moduleType: typeof module,
+      gradeType: typeof grade,
+      unitType: typeof unit,
+      subjectIsEmpty: subjectValue === '' || subjectValue === null || subjectValue === undefined,
+      moduleIsEmpty: module === '' || module === null || module === undefined
+    });
+    console.log('[Upload Video] =================================');
+    
     let videoData = {
       videoId,
       title: title || videoId,
-      description: description !== undefined && description !== null ? description : '',
+      description: description !== undefined && description !== null ? String(description) : '',
       language,
-      subject: subjectValue !== undefined && subjectValue !== null && subjectValue.trim() !== '' ? subjectValue.trim() : null,
-      grade: grade !== undefined && grade !== null && grade.toString().trim() !== '' ? grade.toString().trim() : null,
-      unit: unit !== undefined && unit !== null && unit.toString().trim() !== '' ? unit.toString().trim() : null,
-      lesson: lesson !== undefined && lesson !== null && lesson.toString().trim() !== '' ? lesson.toString().trim() : null,
-      module: module !== undefined && module !== null && module.toString().trim() !== '' ? module.toString().trim() : null,
-      activity: activity || null,
-      topic: topic || null,
+      subject: safeStringValue(subjectValue),
+      grade: safeStringValue(grade),
+      unit: safeStringValue(unit),
+      lesson: safeStringValue(lesson),
+      module: safeStringValue(module),
+      activity: safeStringValue(activity),
+      topic: safeStringValue(topic),
       filePath: relativePath, // Relative path: upload/filename.mp4
       streamingUrl,
       qrUrl,
@@ -592,6 +755,24 @@ export async function uploadVideo(req, res) {
       size: fileSize,
       status: status || 'active'
     };
+    
+    console.log('[Upload Video] ===== PROCESSED DATA FOR DATABASE =====');
+    console.log('[Upload Video] Processed video data before saving to createVideo:', {
+      subject: videoData.subject,
+      module: videoData.module,
+      unit: videoData.unit,
+      grade: videoData.grade,
+      lesson: videoData.lesson,
+      status: videoData.status,
+      description: videoData.description,
+      rawSubject: subjectValue,
+      rawModule: module,
+      rawUnit: unit,
+      rawGrade: grade,
+      willSaveSubject: videoData.subject !== null,
+      willSaveModule: videoData.module !== null
+    });
+    console.log('[Upload Video] ======================================');
     
     console.log('[Upload Video] Video data to save:', {
       videoId,
@@ -901,9 +1082,786 @@ export async function replaceVideoFile(req, res) {
   }
 }
 
+export async function getVideoById(req, res) {
+  try {
+    const { id } = req.params;
+    const video = await videoService.getVideoById(id);
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+    
+    // Log raw database values for debugging
+    console.log('[getVideoById] Raw video data from database:', {
+      id: video.id,
+      video_id: video.video_id,
+      subject: video.subject,
+      grade: video.grade,
+      unit: video.unit,
+      lesson: video.lesson,
+      module: video.module,
+      allKeys: Object.keys(video)
+    });
+    
+    // Determine subject value (course column removed, only use subject)
+    const subjectValue = (video.subject !== undefined && video.subject !== null && video.subject !== '') 
+      ? video.subject 
+      : null;
+    
+    // Ensure all fields are properly returned with backward compatibility
+    const response = {
+      ...video,
+      subject: subjectValue,
+      course: subjectValue, // Backward compatibility - always set course to same as subject
+      grade: video.grade !== undefined ? video.grade : null,
+      unit: video.unit !== undefined ? video.unit : null,
+      lesson: video.lesson !== undefined ? video.lesson : null,
+      module: video.module !== undefined ? video.module : null,
+      activity: video.activity !== undefined ? video.activity : null
+    };
+    
+    console.log('[getVideoById] Response data:', {
+      id: response.id,
+      video_id: response.video_id,
+      subject: response.subject,
+      course: response.course,
+      grade: response.grade,
+      unit: response.unit,
+      lesson: response.lesson,
+      module: response.module
+    });
+    
+    res.json(response);
+  } catch (error) {
+    console.error('Get video by ID error:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * Diagnostic endpoint to check why subject, course, and module values are not being fetched
+ * GET /api/videos/diagnostic/:id
+ */
+export async function getVideoMetadataDiagnostic(req, res) {
+  try {
+    const { id } = req.params; // Can be database ID or video_id
+    
+    const diagnostic = {
+      videoId: id,
+      timestamp: new Date().toISOString(),
+      checks: [],
+      errors: [],
+      warnings: [],
+      databaseSchema: {},
+      rawDatabaseValues: null,
+      serviceLayerValues: null,
+      controllerLayerValues: null,
+      recommendations: []
+    };
+    
+    // Declare missingColumns outside try block so it's accessible throughout the function
+    let missingColumns = [];
+    
+    // Check 1: Database Schema - Check which columns exist
+    // First, ensure columns are created
+    try {
+      await ensureVideoColumns();
+      console.log('[Diagnostic] Ensured video columns exist');
+    } catch (ensureError) {
+      console.warn('[Diagnostic] Error ensuring columns:', ensureError.message);
+    }
+    
+    try {
+      // Get database name first
+      const [dbRows] = await pool.execute('SELECT DATABASE() as dbName');
+      const dbName = dbRows[0]?.dbName;
+      
+      const [schemaRows] = await pool.execute(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns
+        WHERE table_schema = ?
+        AND table_name = 'videos'
+        AND column_name IN ('subject', 'course', 'module', 'unit', 'grade', 'lesson', 'activity', 'topic')
+        ORDER BY column_name
+      `, [dbName]);
+      
+      // Handle both lowercase and uppercase column names (MySQL can return either)
+      const validRows = schemaRows.filter(row => {
+        const colName = row.column_name || row.COLUMN_NAME;
+        return colName && colName !== 'null' && colName !== null;
+      });
+      
+      // Extract column names handling both cases
+      const columnsFound = validRows.map(row => {
+        return (row.column_name || row.COLUMN_NAME || '').toLowerCase();
+      }).filter(Boolean);
+      
+      // Build column details
+      const columnDetails = validRows.reduce((acc, row) => {
+        const colName = (row.column_name || row.COLUMN_NAME || '').toLowerCase();
+        if (colName) {
+          acc[colName] = {
+            type: (row.data_type || row.DATA_TYPE || 'unknown'),
+            nullable: (row.is_nullable || row.IS_NULLABLE) === 'YES',
+            default: row.column_default || row.COLUMN_DEFAULT
+          };
+        }
+        return acc;
+      }, {});
+      
+      diagnostic.databaseSchema = {
+        columnsFound: columnsFound,
+        columnDetails: columnDetails,
+        rawQueryResult: schemaRows // For debugging
+      };
+      
+      const requiredColumns = ['subject', 'course', 'module'];
+      missingColumns = requiredColumns.filter(col => 
+        !diagnostic.databaseSchema.columnsFound.includes(col)
+      );
+      
+      if (missingColumns.length > 0) {
+        diagnostic.warnings.push(`Missing columns in database: ${missingColumns.join(', ')}`);
+        diagnostic.recommendations.push(`Add missing columns: ${missingColumns.join(', ')}`);
+        
+        // Try to create missing columns immediately
+        try {
+          console.log('[Diagnostic] Attempting to create missing columns:', missingColumns);
+          for (const col of missingColumns) {
+            try {
+              if (col === 'subject') {
+                await pool.execute("ALTER TABLE videos ADD COLUMN subject VARCHAR(255) NULL AFTER id");
+                await pool.execute("ALTER TABLE videos ADD INDEX idx_subject (subject)");
+              } else if (col === 'course') {
+                await pool.execute("ALTER TABLE videos ADD COLUMN course VARCHAR(255) NULL AFTER subject");
+              } else if (col === 'module') {
+                await pool.execute("ALTER TABLE videos ADD COLUMN module VARCHAR(255) NULL AFTER lesson");
+              }
+              console.log(`[Diagnostic] Successfully created column: ${col}`);
+            } catch (colError) {
+              if (colError.code !== 'ER_DUP_FIELDNAME') {
+                console.warn(`[Diagnostic] Failed to create column ${col}:`, colError.message);
+              }
+            }
+          }
+          
+          // Re-check after creation
+          const [newSchemaRows] = await pool.execute(`
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = ?
+            AND table_name = 'videos'
+            AND column_name IN ('subject', 'course', 'module', 'unit', 'grade', 'lesson', 'activity', 'topic')
+            ORDER BY column_name
+          `, [dbName]);
+          
+          const newValidRows = newSchemaRows.filter(row => {
+            const colName = row.column_name || row.COLUMN_NAME;
+            return colName && colName !== 'null' && colName !== null;
+          });
+          
+          diagnostic.databaseSchema.columnsFound = newValidRows.map(row => {
+            return (row.column_name || row.COLUMN_NAME || '').toLowerCase();
+          }).filter(Boolean);
+          missingColumns = requiredColumns.filter(col => 
+            !diagnostic.databaseSchema.columnsFound.includes(col)
+          );
+        } catch (createError) {
+          console.error('[Diagnostic] Error creating columns:', createError.message);
+        }
+      }
+      
+      diagnostic.checks.push({
+        name: 'Database Schema Check',
+        status: missingColumns.length === 0 ? 'pass' : 'warning',
+        message: missingColumns.length === 0 
+          ? 'All required columns exist'
+          : `Missing columns: ${missingColumns.join(', ')}`,
+        details: diagnostic.databaseSchema
+      });
+    } catch (schemaError) {
+      diagnostic.errors.push(`Schema check failed: ${schemaError.message}`);
+      diagnostic.checks.push({
+        name: 'Database Schema Check',
+        status: 'error',
+        message: schemaError.message
+      });
+      // If schema check failed, we don't know which columns are missing
+      // So we'll set missingColumns to an empty array to avoid errors later
+      missingColumns = [];
+    }
+    
+    // Check 2: Find video by ID (try both database ID and video_id)
+    let videoRecord = null;
+    let isDatabaseId = false;
+    
+    try {
+      // Try as database ID first
+      const [idRows] = await pool.execute('SELECT * FROM videos WHERE id = ?', [id]);
+      if (idRows.length > 0) {
+        videoRecord = idRows[0];
+        isDatabaseId = true;
+        diagnostic.checks.push({
+          name: 'Video Lookup',
+          status: 'pass',
+          message: `Video found by database ID: ${id}`,
+          details: { lookupType: 'database_id', videoId: videoRecord.video_id }
+        });
+      } else {
+        // Try as video_id
+        const [videoIdRows] = await pool.execute('SELECT * FROM videos WHERE video_id = ?', [id]);
+        if (videoIdRows.length > 0) {
+          videoRecord = videoIdRows[0];
+          diagnostic.checks.push({
+            name: 'Video Lookup',
+            status: 'pass',
+            message: `Video found by video_id: ${id}`,
+            details: { lookupType: 'video_id', databaseId: videoRecord.id }
+          });
+        } else {
+          diagnostic.errors.push(`Video not found with ID: ${id}`);
+          diagnostic.checks.push({
+            name: 'Video Lookup',
+            status: 'error',
+            message: `Video not found with ID: ${id}`
+          });
+          return res.status(404).json(diagnostic);
+        }
+      }
+    } catch (lookupError) {
+      diagnostic.errors.push(`Video lookup failed: ${lookupError.message}`);
+      diagnostic.checks.push({
+        name: 'Video Lookup',
+        status: 'error',
+        message: lookupError.message
+      });
+      return res.status(500).json(diagnostic);
+    }
+    
+    // Check 3: Raw Database Values - What's actually stored
+    diagnostic.rawDatabaseValues = {
+      id: videoRecord.id,
+      video_id: videoRecord.video_id,
+      title: videoRecord.title,
+      subject: videoRecord.subject,
+      course: videoRecord.course,
+      grade: videoRecord.grade,
+      unit: videoRecord.unit,
+      lesson: videoRecord.lesson,
+      module: videoRecord.module,
+      activity: videoRecord.activity,
+      topic: videoRecord.topic,
+      // Show raw types and values
+      subjectType: typeof videoRecord.subject,
+      courseType: typeof videoRecord.course,
+      moduleType: typeof videoRecord.module,
+      subjectIsNull: videoRecord.subject === null,
+      courseIsNull: videoRecord.course === null,
+      moduleIsNull: videoRecord.module === null,
+      subjectIsUndefined: videoRecord.subject === undefined,
+      courseIsUndefined: videoRecord.course === undefined,
+      moduleIsUndefined: videoRecord.module === undefined,
+      subjectIsEmpty: videoRecord.subject === '',
+      courseIsEmpty: videoRecord.course === '',
+      moduleIsEmpty: videoRecord.module === ''
+    };
+    
+    // Check 4: Service Layer Processing
+    try {
+      const serviceVideo = await videoService.getVideoById(videoRecord.id);
+      diagnostic.serviceLayerValues = {
+        subject: serviceVideo?.subject,
+        course: serviceVideo?.course,
+        module: serviceVideo?.module,
+        unit: serviceVideo?.unit,
+        grade: serviceVideo?.grade,
+        lesson: serviceVideo?.lesson,
+        subjectType: typeof serviceVideo?.subject,
+        courseType: typeof serviceVideo?.course,
+        moduleType: typeof serviceVideo?.module
+      };
+      
+      diagnostic.checks.push({
+        name: 'Service Layer Processing',
+        status: 'pass',
+        message: 'Service layer processed video successfully',
+        details: diagnostic.serviceLayerValues
+      });
+    } catch (serviceError) {
+      diagnostic.errors.push(`Service layer processing failed: ${serviceError.message}`);
+      diagnostic.checks.push({
+        name: 'Service Layer Processing',
+        status: 'error',
+        message: serviceError.message
+      });
+    }
+    
+    // Check 5: Controller Layer Processing (via getAllVideos)
+    try {
+      const allVideos = await videoService.getAllVideos({});
+      const controllerVideo = allVideos.find(v => 
+        v.id === videoRecord.id || v.video_id === videoRecord.video_id
+      );
+      
+      if (controllerVideo) {
+        diagnostic.controllerLayerValues = {
+          subject: controllerVideo.subject,
+          course: controllerVideo.course,
+          module: controllerVideo.module,
+          unit: controllerVideo.unit,
+          grade: controllerVideo.grade,
+          lesson: controllerVideo.lesson,
+          subjectType: typeof controllerVideo.subject,
+          courseType: typeof controllerVideo.course,
+          moduleType: typeof controllerVideo.module
+        };
+        
+        diagnostic.checks.push({
+          name: 'Controller Layer Processing',
+          status: 'pass',
+          message: 'Controller layer processed video successfully',
+          details: diagnostic.controllerLayerValues
+        });
+      } else {
+        diagnostic.warnings.push('Video not found in getAllVideos result');
+      }
+    } catch (controllerError) {
+      diagnostic.errors.push(`Controller layer processing failed: ${controllerError.message}`);
+    }
+    
+    // Analysis: Compare values at each layer with detailed test cases
+    const analysis = {
+      subjectValueLost: false,
+      courseValueLost: false,
+      moduleValueLost: false,
+      issues: [],
+      testCases: [],
+      rootCause: null,
+      solution: null
+    };
+    
+    // Test Case 1: Check if values exist in database
+    const testCase1 = {
+      name: 'Database Storage Test',
+      description: 'Check if subject and module values are stored in the database',
+      status: 'unknown',
+      details: {},
+      passed: false,
+      failureReason: null
+    };
+    
+    if (diagnostic.rawDatabaseValues.subjectIsNull && diagnostic.rawDatabaseValues.courseIsNull) {
+      analysis.subjectValueLost = true;
+      testCase1.status = 'failed';
+      testCase1.passed = false;
+      testCase1.failureReason = 'Subject value is NULL in database';
+      testCase1.details = {
+        databaseValue: diagnostic.rawDatabaseValues.subject,
+        isNull: diagnostic.rawDatabaseValues.subjectIsNull,
+        isUndefined: diagnostic.rawDatabaseValues.subjectIsUndefined,
+        isEmpty: diagnostic.rawDatabaseValues.subjectIsEmpty
+      };
+      analysis.issues.push('❌ TEST FAILED: Subject value is NULL in database - value was never saved during upload or update');
+      analysis.rootCause = 'Values were never saved to database. This happens when: 1) Video was uploaded before columns existed, 2) Upload form did not include subject/module values, 3) Update function failed to save values';
+      analysis.solution = 'SOLUTION: Edit the video and manually enter subject and module values, then save. For new uploads, ensure the upload form includes subject and module fields.';
+    } else {
+      testCase1.status = 'passed';
+      testCase1.passed = true;
+      testCase1.details = {
+        databaseValue: diagnostic.rawDatabaseValues.subject || diagnostic.rawDatabaseValues.course,
+        stored: true
+      };
+    }
+    
+    if (diagnostic.rawDatabaseValues.moduleIsNull) {
+      analysis.moduleValueLost = true;
+      const testCase1b = {
+        name: 'Module Database Storage Test',
+        description: 'Check if module value is stored in the database',
+        status: 'failed',
+        passed: false,
+        failureReason: 'Module value is NULL in database',
+        details: {
+          databaseValue: diagnostic.rawDatabaseValues.module,
+          isNull: diagnostic.rawDatabaseValues.moduleIsNull,
+          isUndefined: diagnostic.rawDatabaseValues.moduleIsUndefined,
+          isEmpty: diagnostic.rawDatabaseValues.moduleIsEmpty
+        }
+      };
+      analysis.testCases.push(testCase1b);
+      analysis.issues.push('❌ TEST FAILED: Module value is NULL in database - value was never saved during upload or update');
+    } else {
+      const testCase1b = {
+        name: 'Module Database Storage Test',
+        description: 'Check if module value is stored in the database',
+        status: 'passed',
+        passed: true,
+        details: {
+          databaseValue: diagnostic.rawDatabaseValues.module,
+          stored: true
+        }
+      };
+      analysis.testCases.push(testCase1b);
+    }
+    
+    analysis.testCases.push(testCase1);
+    
+    // Test Case 2: Check if service layer retrieves values correctly
+    const testCase2 = {
+      name: 'Service Layer Retrieval Test',
+      description: 'Check if service layer (getVideoById) correctly retrieves subject and module from database',
+      status: 'unknown',
+      details: {},
+      passed: false,
+      failureReason: null
+    };
+    
+    if (diagnostic.serviceLayerValues) {
+      const dbHasSubject = !diagnostic.rawDatabaseValues.subjectIsNull;
+      const serviceHasSubject = diagnostic.serviceLayerValues.subject !== null && diagnostic.serviceLayerValues.subject !== undefined;
+      
+      if (dbHasSubject && !serviceHasSubject) {
+        testCase2.status = 'failed';
+        testCase2.passed = false;
+        testCase2.failureReason = 'Service layer lost subject value during retrieval';
+        testCase2.details = {
+          databaseValue: diagnostic.rawDatabaseValues.subject,
+          serviceValue: diagnostic.serviceLayerValues.subject,
+          mismatch: true
+        };
+        analysis.issues.push('❌ TEST FAILED: Subject value exists in database but service layer returned NULL');
+        analysis.rootCause = 'Service layer (getVideoById) is not correctly retrieving subject value from database';
+        analysis.solution = 'SOLUTION: Check getVideoById function in videoService.js - ensure it selects subject column and maps it correctly';
+      } else if (!dbHasSubject) {
+        testCase2.status = 'skipped';
+        testCase2.passed = true;
+        testCase2.details = {
+          reason: 'Cannot test - value does not exist in database',
+          databaseValue: null
+        };
+      } else {
+        testCase2.status = 'passed';
+        testCase2.passed = true;
+        testCase2.details = {
+          databaseValue: diagnostic.rawDatabaseValues.subject,
+          serviceValue: diagnostic.serviceLayerValues.subject,
+          match: true
+        };
+      }
+      
+      const dbHasModule = !diagnostic.rawDatabaseValues.moduleIsNull;
+      const serviceHasModule = diagnostic.serviceLayerValues.module !== null && diagnostic.serviceLayerValues.module !== undefined;
+      
+      if (dbHasModule && !serviceHasModule) {
+        const testCase2b = {
+          name: 'Module Service Layer Retrieval Test',
+          description: 'Check if service layer correctly retrieves module from database',
+          status: 'failed',
+          passed: false,
+          failureReason: 'Service layer lost module value during retrieval',
+          details: {
+            databaseValue: diagnostic.rawDatabaseValues.module,
+            serviceValue: diagnostic.serviceLayerValues.module,
+            mismatch: true
+          }
+        };
+        analysis.testCases.push(testCase2b);
+        analysis.issues.push('❌ TEST FAILED: Module value exists in database but service layer returned NULL');
+      } else if (!dbHasModule) {
+        const testCase2b = {
+          name: 'Module Service Layer Retrieval Test',
+          description: 'Check if service layer correctly retrieves module from database',
+          status: 'skipped',
+          passed: true,
+          details: {
+            reason: 'Cannot test - value does not exist in database',
+            databaseValue: null
+          }
+        };
+        analysis.testCases.push(testCase2b);
+      } else {
+        const testCase2b = {
+          name: 'Module Service Layer Retrieval Test',
+          description: 'Check if service layer correctly retrieves module from database',
+          status: 'passed',
+          passed: true,
+          details: {
+            databaseValue: diagnostic.rawDatabaseValues.module,
+            serviceValue: diagnostic.serviceLayerValues.module,
+            match: true
+          }
+        };
+        analysis.testCases.push(testCase2b);
+      }
+    }
+    
+    analysis.testCases.push(testCase2);
+    
+    // Test Case 3: Check if controller layer retrieves values correctly
+    const testCase3 = {
+      name: 'Controller Layer Retrieval Test',
+      description: 'Check if controller layer (getAllVideos) correctly retrieves and maps subject and module',
+      status: 'unknown',
+      details: {},
+      passed: false,
+      failureReason: null
+    };
+    
+    if (diagnostic.controllerLayerValues) {
+      const serviceHasSubject = diagnostic.serviceLayerValues?.subject !== null && diagnostic.serviceLayerValues?.subject !== undefined;
+      const controllerHasSubject = diagnostic.controllerLayerValues.subject !== null && diagnostic.controllerLayerValues.subject !== undefined;
+      
+      if (serviceHasSubject && !controllerHasSubject) {
+        testCase3.status = 'failed';
+        testCase3.passed = false;
+        testCase3.failureReason = 'Controller layer lost subject value during mapping';
+        testCase3.details = {
+          serviceValue: diagnostic.serviceLayerValues.subject,
+          controllerValue: diagnostic.controllerLayerValues.subject,
+          mismatch: true
+        };
+        analysis.issues.push('❌ TEST FAILED: Subject value exists in service layer but controller layer returned NULL');
+        analysis.rootCause = 'Controller layer (getAllVideos) is not correctly mapping subject value';
+        analysis.solution = 'SOLUTION: Check getAllVideos function in videoController.js - ensure it maps subject correctly from service layer response';
+      } else if (!serviceHasSubject) {
+        testCase3.status = 'skipped';
+        testCase3.passed = true;
+        testCase3.details = {
+          reason: 'Cannot test - value does not exist in service layer',
+          serviceValue: null
+        };
+      } else {
+        testCase3.status = 'passed';
+        testCase3.passed = true;
+        testCase3.details = {
+          serviceValue: diagnostic.serviceLayerValues.subject,
+          controllerValue: diagnostic.controllerLayerValues.subject,
+          match: true
+        };
+      }
+      
+      const serviceHasModule = diagnostic.serviceLayerValues?.module !== null && diagnostic.serviceLayerValues?.module !== undefined;
+      const controllerHasModule = diagnostic.controllerLayerValues.module !== null && diagnostic.controllerLayerValues.module !== undefined;
+      
+      if (serviceHasModule && !controllerHasModule) {
+        const testCase3b = {
+          name: 'Module Controller Layer Retrieval Test',
+          description: 'Check if controller layer correctly retrieves and maps module',
+          status: 'failed',
+          passed: false,
+          failureReason: 'Controller layer lost module value during mapping',
+          details: {
+            serviceValue: diagnostic.serviceLayerValues.module,
+            controllerValue: diagnostic.controllerLayerValues.module,
+            mismatch: true
+          }
+        };
+        analysis.testCases.push(testCase3b);
+        analysis.issues.push('❌ TEST FAILED: Module value exists in service layer but controller layer returned NULL');
+      } else if (!serviceHasModule) {
+        const testCase3b = {
+          name: 'Module Controller Layer Retrieval Test',
+          description: 'Check if controller layer correctly retrieves and maps module',
+          status: 'skipped',
+          passed: true,
+          details: {
+            reason: 'Cannot test - value does not exist in service layer',
+            serviceValue: null
+          }
+        };
+        analysis.testCases.push(testCase3b);
+      } else {
+        const testCase3b = {
+          name: 'Module Controller Layer Retrieval Test',
+          description: 'Check if controller layer correctly retrieves and maps module',
+          status: 'passed',
+          passed: true,
+          details: {
+            serviceValue: diagnostic.serviceLayerValues.module,
+            controllerValue: diagnostic.controllerLayerValues.module,
+            match: true
+          }
+        };
+        analysis.testCases.push(testCase3b);
+      }
+    }
+    
+    analysis.testCases.push(testCase3);
+    
+    // Test Case 4: Check column existence
+    const testCase4 = {
+      name: 'Column Existence Test',
+      description: 'Verify that subject and module columns exist in database schema',
+      status: missingColumns.length === 0 ? 'passed' : 'failed',
+      passed: missingColumns.length === 0,
+      failureReason: missingColumns.length > 0 ? `Missing columns: ${missingColumns.join(', ')}` : null,
+      details: {
+        requiredColumns: ['subject', 'module'],
+        existingColumns: diagnostic.databaseSchema.columnsFound,
+        missingColumns: missingColumns
+      }
+    };
+    
+    if (missingColumns.length > 0) {
+      analysis.issues.push(`❌ TEST FAILED: Required columns missing: ${missingColumns.join(', ')}`);
+      analysis.rootCause = `Database columns ${missingColumns.join(', ')} do not exist. Values cannot be stored without these columns.`;
+      analysis.solution = `SOLUTION: Run database migration to add missing columns. The diagnostic will attempt to create them automatically.`;
+    }
+    
+    analysis.testCases.push(testCase4);
+    
+    // Test Case 5: Check data type consistency
+    const testCase5 = {
+      name: 'Data Type Consistency Test',
+      description: 'Verify that subject and module values have consistent data types across layers',
+      status: 'unknown',
+      details: {},
+      passed: false,
+      failureReason: null
+    };
+    
+    if (diagnostic.rawDatabaseValues && diagnostic.serviceLayerValues && diagnostic.controllerLayerValues) {
+      const dbSubjectType = diagnostic.rawDatabaseValues.subjectType;
+      const serviceSubjectType = diagnostic.serviceLayerValues.subjectType;
+      const controllerSubjectType = diagnostic.controllerLayerValues.subjectType;
+      
+      if (dbSubjectType === serviceSubjectType && serviceSubjectType === controllerSubjectType) {
+        testCase5.status = 'passed';
+        testCase5.passed = true;
+        testCase5.details = {
+          consistent: true,
+          type: dbSubjectType
+        };
+      } else {
+        testCase5.status = 'warning';
+        testCase5.passed = true;
+        testCase5.details = {
+          consistent: false,
+          databaseType: dbSubjectType,
+          serviceType: serviceSubjectType,
+          controllerType: controllerSubjectType
+        };
+        analysis.issues.push('⚠️ WARNING: Data types are inconsistent across layers - this may cause display issues');
+      }
+    } else {
+      testCase5.status = 'skipped';
+      testCase5.passed = true;
+      testCase5.details = { reason: 'Cannot test - values are NULL' };
+    }
+    
+    analysis.testCases.push(testCase5);
+    
+    // Summary of test results
+    const passedTests = analysis.testCases.filter(t => t.passed).length;
+    const totalTests = analysis.testCases.length;
+    analysis.testSummary = {
+      total: totalTests,
+      passed: passedTests,
+      failed: totalTests - passedTests,
+      passRate: `${Math.round((passedTests / totalTests) * 100)}%`
+    };
+    
+    diagnostic.analysis = analysis;
+    
+    // Generate recommendations
+    if (analysis.subjectValueLost) {
+      diagnostic.recommendations.push('Update the video to set subject and course values');
+      diagnostic.recommendations.push('Check upload/creation process to ensure subject is being saved');
+    }
+    
+    if (analysis.moduleValueLost) {
+      diagnostic.recommendations.push('Update the video to set module value');
+      diagnostic.recommendations.push('Check upload/creation process to ensure module is being saved');
+    }
+    
+    if (missingColumns.length > 0) {
+      diagnostic.recommendations.push('Run database migration to add missing columns');
+    }
+    
+    // Overall status
+    const hasErrors = diagnostic.errors.length > 0;
+    const hasWarnings = diagnostic.warnings.length > 0 || analysis.issues.length > 0;
+    
+    diagnostic.status = hasErrors ? 'error' : (hasWarnings ? 'warning' : 'healthy');
+    diagnostic.summary = {
+      videoFound: true,
+      columnsExist: missingColumns.length === 0,
+      valuesPresent: !analysis.subjectValueLost && !analysis.moduleValueLost,
+      issuesFound: analysis.issues.length
+    };
+    
+    res.json(diagnostic);
+  } catch (error) {
+    console.error('[Video Metadata Diagnostic] Error:', error);
+    res.status(500).json({
+      error: 'Diagnostic failed',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+}
+
+/**
+ * Quick fix endpoint to set test values for subject and module
+ * POST /api/videos/diagnostic/:id/quick-fix
+ */
+export async function quickFixVideoMetadata(req, res) {
+  try {
+    const { id } = req.params;
+    const { subject, module } = req.body;
+    
+    // Ensure columns exist
+    await ensureVideoColumns();
+    
+    // Update the video with provided values
+    const updates = {};
+    if (subject !== undefined) {
+      updates.subject = subject;
+    }
+    if (module !== undefined) {
+      updates.module = module;
+    }
+    
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No values provided to update' });
+    }
+    
+    console.log('[Quick Fix] Updating video ID:', id, 'with values:', updates);
+    
+    const success = await videoService.updateVideo(id, updates);
+    
+    if (success) {
+      // Fetch updated video to verify
+      const updatedVideo = await videoService.getVideoById(id);
+      
+      res.json({
+        success: true,
+        message: 'Video metadata updated successfully',
+        video: {
+          id: updatedVideo.id,
+          video_id: updatedVideo.video_id,
+          subject: updatedVideo.subject,
+          module: updatedVideo.module,
+          grade: updatedVideo.grade,
+          unit: updatedVideo.unit,
+          lesson: updatedVideo.lesson
+        }
+      });
+    } else {
+      res.status(404).json({ error: 'Video not found' });
+    }
+  } catch (error) {
+    console.error('[Quick Fix] Error:', error);
+    res.status(500).json({
+      error: 'Quick fix failed',
+      message: error.message
+    });
+  }
+}
+
 export async function updateVideo(req, res) {
   try {
     const { id } = req.params;
+    await ensureVideoColumns();
     const success = await videoService.updateVideo(id, req.body);
     if (success) {
       const video = await videoService.getVideoById(id);
@@ -934,6 +1892,9 @@ export async function deleteVideo(req, res) {
 
 export async function getAllQRCodes(req, res) {
   try {
+    // Ensure required columns exist to avoid ER_BAD_FIELD_ERROR
+    await ensureQrColumns();
+
     console.log('[Get All QR Codes] Fetching all videos with QR codes');
     
     // Get all active videos with QR codes
@@ -1276,6 +2237,34 @@ export async function getFilterValues(req, res) {
  * Format: ID, Title, Link/Path, Grade, Lesson, Module, Activity
  * No thumbnail column
  */
+/**
+ * Increment view count for a video
+ */
+export async function incrementVideoViews(req, res) {
+  try {
+    const { videoId } = req.params;
+    
+    if (!videoId) {
+      return res.status(400).json({ error: 'Video ID is required' });
+    }
+    
+    const newViews = await videoService.incrementVideoViews(videoId);
+    
+    if (newViews !== null) {
+      res.json({ 
+        success: true, 
+        views: newViews,
+        videoId: videoId 
+      });
+    } else {
+      res.status(404).json({ error: 'Video not found' });
+    }
+  } catch (error) {
+    console.error('Increment video views error:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
 export async function generateVideosCSV(req, res) {
   try {
     // Get all active videos

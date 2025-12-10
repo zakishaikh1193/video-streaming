@@ -107,13 +107,16 @@ router.get('/:videoId/qr-download', (req, res, next) => {
   next();
 }, authenticateToken, videoController.downloadQRCode);
 
-// Video upload route - store in backend/upload folder
+// Video upload route - store directly in backend/upload folder (no temp file)
 const uploadDir = path.join(__dirname, '../upload');
 ensureDirectoryExists(uploadDir).catch(() => {});
 
 router.post('/upload', authenticateToken, multer({ 
-  dest: path.join(__dirname, '../../temp-uploads'), // Temp location before moving to upload/
-  limits: { fileSize: 5 * 1024 * 1024 * 1024 } // 5GB limit
+  dest: uploadDir, // Save directly to final location (no temp file)
+  limits: { 
+    fileSize: 5 * 1024 * 1024 * 1024, // 5GB limit
+    fieldSize: 10 * 1024 * 1024 // 10MB for form fields
+  }
 }).fields([
   { name: 'video', maxCount: 1 },
   { name: 'thumbnail', maxCount: 1 }

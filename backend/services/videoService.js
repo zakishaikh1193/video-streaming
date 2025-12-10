@@ -13,8 +13,9 @@ export async function createVideo(videoData) {
     videoId,
     partnerId,
     title,
-    course,
+    subject,
     grade,
+    unit,
     lesson,
     module,
     activity,
@@ -36,45 +37,98 @@ export async function createVideo(videoData) {
   let query, params;
   
   try {
-    // Try with new schema (partner_id, course, module, activity, thumbnail_url)
-    query = `
-      INSERT INTO videos (
-        video_id, partner_id, title, course, grade, lesson, module, activity, topic, description, language,
-        file_path, streaming_url, qr_url, thumbnail_url, redirect_slug, duration, size, version, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    params = [
-      videoId, 
-      partnerId || null, 
-      title || 'Untitled Video', 
-      course || null, 
-      grade || null, 
-      lesson || null, 
-      module || null, 
-      activity || null, 
-      topic || null, 
-      description || '', 
-      language || 'en',
-      filePath || null, 
-      streamingUrl || null, 
-      qrUrl || null, 
-      thumbnailUrl || null, 
-      redirectSlug || null, 
-      duration || 0, 
-      size || 0, 
-      version || 1, 
-      status || 'active'
-    ];
-    
-    const [result] = await pool.execute(query, params);
-    return result.insertId;
+    // Try with new schema (partner_id, subject, unit, module, activity, thumbnail_url)
+    // First try with unit column
+    try {
+      query = `
+        INSERT INTO videos (
+          video_id, partner_id, title, subject, grade, unit, lesson, module, activity, topic, description, language,
+          file_path, streaming_url, qr_url, thumbnail_url, redirect_slug, duration, size, version, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      params = [
+        videoId, 
+        partnerId || null, 
+        title || 'Untitled Video', 
+        subject || null, 
+        grade || null, 
+        unit || null,
+        lesson || null, 
+        module || null, 
+        activity || null, 
+        topic || null, 
+        description || '', 
+        language || 'en',
+        filePath || null, 
+        streamingUrl || null, 
+        qrUrl || null, 
+        thumbnailUrl || null, 
+        redirectSlug || null, 
+        duration || 0, 
+        size || 0, 
+        version || 1, 
+        status || 'active'
+      ];
+      
+      const [result] = await pool.execute(query, params);
+      return result.insertId;
+    } catch (unitError) {
+      // If unit column doesn't exist, try to add it first, then retry
+      if (unitError.code === 'ER_BAD_FIELD_ERROR') {
+        console.log('[createVideo] Unit column not found, attempting to add it...');
+        try {
+          // Try to add unit column if it doesn't exist
+          await pool.execute('ALTER TABLE videos ADD COLUMN unit VARCHAR(255) NULL AFTER grade');
+          console.log('[createVideo] Unit column added successfully, retrying insert...');
+          // Retry the original insert
+          const [result] = await pool.execute(query, params);
+          return result.insertId;
+        } catch (alterError) {
+          console.error('[createVideo] Failed to add unit column:', alterError.message);
+          // If we can't add the column, fall back to storing without unit
+          console.log('[createVideo] Falling back to insert without unit column');
+          query = `
+            INSERT INTO videos (
+              video_id, partner_id, title, subject, grade, lesson, module, activity, topic, description, language,
+              file_path, streaming_url, qr_url, thumbnail_url, redirect_slug, duration, size, version, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+          params = [
+            videoId, 
+            partnerId || null, 
+            title || 'Untitled Video', 
+            subject || null, // Keep subject separate, don't mix with unit
+            grade || null, 
+            lesson || null, 
+            module || null, 
+            activity || null, 
+            topic || null, 
+            description || '', 
+            language || 'en',
+            filePath || null, 
+            streamingUrl || null, 
+            qrUrl || null, 
+            thumbnailUrl || null, 
+            redirectSlug || null, 
+            duration || 0, 
+            size || 0, 
+            version || 1, 
+            status || 'active'
+          ];
+          
+          const [result] = await pool.execute(query, params);
+          return result.insertId;
+        }
+      }
+      throw unitError;
+    }
   } catch (error) {
     // If new columns don't exist, try with old schema
     if (error.code === 'ER_BAD_FIELD_ERROR') {
       console.warn('New columns not found, using old schema. Please run database migrations.');
       
-      // Fallback to old schema (without course, module, activity, thumbnail_url)
-      // Map course/grade/lesson to old grade/unit/lesson structure
+      // Fallback to old schema (without subject, module, activity, thumbnail_url)
+      // Map subject/grade/lesson to old grade/unit/lesson structure
       query = `
         INSERT INTO videos (
           video_id, title, grade, unit, lesson, topic, description, language,
@@ -84,7 +138,7 @@ export async function createVideo(videoData) {
       
       // Try to extract numeric values from text fields
       const gradeNum = grade ? parseInt(grade.toString().replace(/\D/g, '')) || null : null;
-      const unitNum = course ? parseInt(course.toString().replace(/\D/g, '')) || null : null;
+      const unitNum = subject ? parseInt(subject.toString().replace(/\D/g, '')) || null : null;
       const lessonNum = lesson ? parseInt(lesson.toString().replace(/\D/g, '')) || null : null;
       
       params = [
@@ -98,8 +152,6 @@ export async function createVideo(videoData) {
     }
     throw error;
   }
-  
-  return result.insertId;
 }
 
 /**
@@ -123,7 +175,23 @@ export async function getVideoByVideoId(videoId, includeInactive = false) {
 export async function getVideoById(id) {
   const query = 'SELECT * FROM videos WHERE id = ?';
   const [rows] = await pool.execute(query, [id]);
-  return rows[0] || null;
+  const video = rows[0] || null;
+  
+  // Log to verify subject information is being retrieved
+  if (video) {
+    console.log('[getVideoById] Retrieved video subject info:', {
+      id: video.id,
+      video_id: video.video_id,
+      subject: video.subject,
+      grade: video.grade,
+      unit: video.unit,
+      lesson: video.lesson,
+      module: video.module,
+      description: video.description
+    });
+  }
+  
+  return video;
 }
 
 /**
@@ -162,6 +230,31 @@ export async function findVideoByFileOrUrl(filePath, streamingUrl) {
 }
 
 /**
+ * Check if a video with the same title already exists
+ * @param {string} title - The title to check
+ * @param {boolean} includeInactive - If true, also check inactive videos
+ */
+export async function getVideoByTitle(title, includeInactive = false) {
+  if (!title || title.trim() === '') {
+    return null;
+  }
+  
+  let query = 'SELECT * FROM videos WHERE title = ?';
+  if (!includeInactive) {
+    query += ' AND status = "active"';
+  }
+  query += ' ORDER BY created_at DESC LIMIT 1';
+  
+  try {
+    const [rows] = await pool.execute(query, [title.trim()]);
+    return rows[0] || null;
+  } catch (error) {
+    console.error('Error checking for duplicate title:', error);
+    return null;
+  }
+}
+
+/**
  * Get video by redirect slug (short URL)
  */
 export async function getVideoByRedirectSlug(redirectSlug, includeInactive = false) {
@@ -181,13 +274,13 @@ export async function getAllVideos(filters = {}) {
   let query = 'SELECT * FROM videos WHERE 1=1';
   const params = [];
   
-  // Search filter - searches in title, description, video_id, course, grade, lesson, module, activity, topic
+  // Search filter - searches in title, description, video_id, subject, grade, lesson, module, activity, topic
   if (filters.search) {
     query += ` AND (
       title LIKE ? OR 
       description LIKE ? OR 
       video_id LIKE ? OR 
-      course LIKE ? OR 
+      subject LIKE ? OR 
       grade LIKE ? OR 
       lesson LIKE ? OR 
       module LIKE ? OR 
@@ -198,8 +291,14 @@ export async function getAllVideos(filters = {}) {
     params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
   }
   
+  if (filters.subject) {
+    query += ' AND subject = ?';
+    params.push(filters.subject);
+  }
+  
+  // Support legacy 'course' filter for backward compatibility
   if (filters.course) {
-    query += ' AND course = ?';
+    query += ' AND subject = ?';
     params.push(filters.course);
   }
   
@@ -216,6 +315,22 @@ export async function getAllVideos(filters = {}) {
   if (filters.module) {
     query += ' AND module = ?';
     params.push(filters.module);
+  }
+  
+  // Filter by module number (extract numeric part from module field)
+  if (filters.moduleNumber) {
+    // Extract number from module field and match
+    // This handles cases like "Module 1", "1", "M1", "Module1", etc.
+    const moduleNum = parseInt(filters.moduleNumber);
+    if (!isNaN(moduleNum)) {
+      // Match if module contains the number (handles "Module 1", "1", "M1", etc.)
+      query += ' AND (module LIKE ? OR module LIKE ? OR module LIKE ? OR module = ?)';
+      params.push(`%${moduleNum}%`, `%Module ${moduleNum}%`, `%M${moduleNum}%`, filters.moduleNumber);
+    } else {
+      // If not a number, just do a text search
+      query += ' AND module LIKE ?';
+      params.push(`%${filters.moduleNumber}%`);
+    }
   }
   
   if (filters.activity) {
@@ -243,6 +358,35 @@ export async function getAllVideos(filters = {}) {
   const [rows] = await pool.execute(query, params);
   
   console.log(`[getAllVideos] Found ${rows.length} videos`);
+  
+  // Log subject information to verify it's being returned - show all fields including nulls
+  if (rows.length > 0) {
+    const sampleVideo = rows[0];
+    console.log('[getAllVideos] Sample video subject info from database (all fields):', {
+      id: sampleVideo.id,
+      video_id: sampleVideo.video_id,
+      title: sampleVideo.title,
+      subject: sampleVideo.subject,
+      grade: sampleVideo.grade,
+      unit: sampleVideo.unit,
+      lesson: sampleVideo.lesson,
+      module: sampleVideo.module,
+      description: sampleVideo.description,
+      status: sampleVideo.status,
+      // Show raw database values
+      subjectType: typeof sampleVideo.subject,
+      gradeType: typeof sampleVideo.grade,
+      unitType: typeof sampleVideo.unit,
+      lessonType: typeof sampleVideo.lesson,
+      moduleType: typeof sampleVideo.module
+    });
+    
+    // Log all column names to verify all fields are being selected
+    if (rows.length > 0) {
+      console.log('[getAllVideos] Available columns in result:', Object.keys(rows[0]));
+    }
+  }
+  
   // Log file paths to verify upload/ videos are included
   if (rows.length > 0) {
     const uploadVideos = rows.filter(v => v.file_path && v.file_path.startsWith('upload/'));
@@ -252,7 +396,18 @@ export async function getAllVideos(filters = {}) {
     }
   }
   
-  return rows;
+  // Ensure all fields are returned, even if null - SELECT * should already do this
+  // But we'll explicitly map to ensure consistency
+  return rows.map(video => ({
+    ...video,
+    // Explicitly include all subject information fields, preserving null values
+    subject: video.subject !== undefined ? video.subject : null,
+    grade: video.grade !== undefined ? video.grade : null,
+    unit: video.unit !== undefined ? video.unit : null,
+    lesson: video.lesson !== undefined ? video.lesson : null,
+    module: video.module !== undefined ? video.module : null,
+    description: video.description !== undefined ? video.description : null
+  }));
 }
 
 /**
@@ -260,26 +415,35 @@ export async function getAllVideos(filters = {}) {
  */
 export async function getFilterValues() {
   try {
+    // Try to get unit column, fallback if it doesn't exist
+    let unitsQuery = 'SELECT DISTINCT unit FROM videos WHERE unit IS NOT NULL AND unit != "" ORDER BY unit ASC';
+    let units = [];
+    try {
+      const [unitsRows] = await pool.execute(unitsQuery);
+      units = unitsRows.map(row => row.unit).filter(Boolean);
+    } catch (unitError) {
+      console.log('[getFilterValues] Unit column not found, skipping');
+    }
+
     const queries = {
-      courses: 'SELECT DISTINCT course FROM videos WHERE course IS NOT NULL AND course != "" ORDER BY course ASC',
+      subjects: 'SELECT DISTINCT subject FROM videos WHERE subject IS NOT NULL AND subject != "" ORDER BY subject ASC',
       grades: 'SELECT DISTINCT grade FROM videos WHERE grade IS NOT NULL AND grade != "" ORDER BY grade ASC',
       lessons: 'SELECT DISTINCT lesson FROM videos WHERE lesson IS NOT NULL AND lesson != "" ORDER BY lesson ASC',
-      modules: 'SELECT DISTINCT module FROM videos WHERE module IS NOT NULL AND module != "" ORDER BY module ASC',
-      activities: 'SELECT DISTINCT activity FROM videos WHERE activity IS NOT NULL AND activity != "" ORDER BY activity ASC'
+      modules: 'SELECT DISTINCT module FROM videos WHERE module IS NOT NULL AND module != "" ORDER BY module ASC'
     };
 
-    const [courses] = await pool.execute(queries.courses);
+    const [subjects] = await pool.execute(queries.subjects);
     const [grades] = await pool.execute(queries.grades);
     const [lessons] = await pool.execute(queries.lessons);
     const [modules] = await pool.execute(queries.modules);
-    const [activities] = await pool.execute(queries.activities);
 
     return {
-      courses: courses.map(row => row.course).filter(Boolean),
+      subjects: subjects.map(row => row.subject).filter(Boolean),
+      courses: subjects.map(row => row.subject).filter(Boolean), // Keep 'courses' for backward compatibility
       grades: grades.map(row => row.grade).filter(Boolean),
+      units: units,
       lessons: lessons.map(row => row.lesson).filter(Boolean),
-      modules: modules.map(row => row.module).filter(Boolean),
-      activities: activities.map(row => row.activity).filter(Boolean)
+      modules: modules.map(row => row.module).filter(Boolean)
     };
   } catch (error) {
     console.error('Error fetching filter values:', error);
@@ -287,9 +451,9 @@ export async function getFilterValues() {
     return {
       courses: [],
       grades: [],
+      units: [],
       lessons: [],
-      modules: [],
-      activities: []
+      modules: []
     };
   }
 }
@@ -299,8 +463,8 @@ export async function getFilterValues() {
  */
 export async function updateVideo(id, updates) {
   const allowedFields = [
-    'title', 'description', 'language', 'status', 'topic',
-    'course', 'grade', 'lesson', 'module', 'activity',
+    'title', 'description', 'language', 'status',
+    'subject', 'course', 'grade', 'unit', 'lesson', 'module',
     'streaming_url', 'file_path', 'thumbnail_url'
   ];
   

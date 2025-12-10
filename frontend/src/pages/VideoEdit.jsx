@@ -18,12 +18,12 @@ function VideoEdit() {
     description: '',
     language: 'en',
     status: 'active',
-    course: '',
+    subject: '',
+    course: '', // Keep for backward compatibility
     grade: '',
+    unit: '',
     lesson: '',
     module: '',
-    activity: '',
-    topic: '',
     streaming_url: '',
     file_path: ''
   });
@@ -40,17 +40,22 @@ function VideoEdit() {
       
       if (foundVideo) {
         setVideo(foundVideo);
+        
+        // Use the same logic as VideoList.jsx for fetching subject
+        const subjectValue = foundVideo.subject || foundVideo.course || '';
+        const finalSubject = subjectValue !== null && subjectValue !== undefined && subjectValue !== '' ? String(subjectValue) : '';
+        
         setFormData({
           title: foundVideo.title || '',
           description: foundVideo.description || '',
           language: foundVideo.language || 'en',
           status: foundVideo.status || 'active',
-          course: foundVideo.course || '',
-          grade: foundVideo.grade || '',
-          lesson: foundVideo.lesson || '',
-          module: foundVideo.module || '',
-          activity: foundVideo.activity || '',
-          topic: foundVideo.topic || '',
+          subject: finalSubject,
+          course: finalSubject, // Keep for backward compatibility
+          grade: foundVideo.grade !== null && foundVideo.grade !== undefined && foundVideo.grade !== '' ? String(foundVideo.grade) : '',
+          unit: foundVideo.unit !== null && foundVideo.unit !== undefined && foundVideo.unit !== '' && foundVideo.unit !== 0 && foundVideo.unit !== '0' ? String(foundVideo.unit) : '',
+          lesson: foundVideo.lesson !== null && foundVideo.lesson !== undefined && foundVideo.lesson !== '' ? String(foundVideo.lesson) : '',
+          module: foundVideo.module !== null && foundVideo.module !== undefined && foundVideo.module !== '' && foundVideo.module !== 0 && foundVideo.module !== '0' ? String(foundVideo.module) : '',
           streaming_url: foundVideo.streaming_url || '',
           file_path: foundVideo.file_path || ''
         });
@@ -131,6 +136,13 @@ function VideoEdit() {
       const updateData = { ...formData };
       delete updateData.streaming_url;
       delete updateData.file_path;
+      
+      // Ensure subject is sent (use subject if available, fallback to course)
+      if (updateData.subject) {
+        updateData.subject = updateData.subject;
+      } else if (updateData.course) {
+        updateData.subject = updateData.course;
+      }
 
       await api.put(`/videos/${id}`, updateData);
       setSuccess('Video updated successfully!');
@@ -322,21 +334,24 @@ function VideoEdit() {
                     <Info className="w-6 h-6 text-purple-600" />
                   </div>
                   <div>
-                    <h2 className="text-xl sm:text-2xl font-bold text-slate-900">Course Information</h2>
-                    <p className="text-sm text-slate-500 mt-1">Organize video by course structure</p>
+                    <h2 className="text-xl sm:text-2xl font-bold text-slate-900">Subject Information</h2>
+                    <p className="text-sm text-slate-500 mt-1">Organize video by subject structure</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2.5">Course</label>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2.5">Subject</label>
                     <input
                       type="text"
-                      name="course"
-                      value={formData.course}
-                      onChange={handleChange}
+                      name="subject"
+                      value={formData.subject || formData.course || ''}
+                      onChange={(e) => {
+                        handleChange(e);
+                        setFormData(prev => ({ ...prev, course: e.target.value })); // Keep course in sync for backward compatibility
+                      }}
                       className="w-full px-4 py-3.5 text-[15px] border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-slate-300"
-                      placeholder="Course name"
+                      placeholder="Subject name"
                       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
                     />
                   </div>
@@ -349,6 +364,18 @@ function VideoEdit() {
                       onChange={handleChange}
                       className="w-full px-4 py-3.5 text-[15px] border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-slate-300"
                       placeholder="Grade"
+                      style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2.5">Unit</label>
+                    <input
+                      type="text"
+                      name="unit"
+                      value={formData.unit}
+                      onChange={handleChange}
+                      className="w-full px-4 py-3.5 text-[15px] border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-slate-300"
+                      placeholder="unit"
                       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
                     />
                   </div>
@@ -373,30 +400,6 @@ function VideoEdit() {
                       onChange={handleChange}
                       className="w-full px-4 py-3.5 text-[15px] border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-slate-300"
                       placeholder="Module"
-                      style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2.5">Activity</label>
-                    <input
-                      type="text"
-                      name="activity"
-                      value={formData.activity}
-                      onChange={handleChange}
-                      className="w-full px-4 py-3.5 text-[15px] border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-slate-300"
-                      placeholder="Activity"
-                      style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2.5">Topic</label>
-                    <input
-                      type="text"
-                      name="topic"
-                      value={formData.topic}
-                      onChange={handleChange}
-                      className="w-full px-4 py-3.5 text-[15px] border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-slate-300"
-                      placeholder="Topic"
                       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
                     />
                   </div>

@@ -80,7 +80,7 @@ function QRCodeStorage() {
     }
   };
 
-  const handleDownloadQR = async (videoId, title) => {
+  const handleDownloadQR = async (videoId, videoData) => {
     try {
       console.log('Downloading QR code for video:', videoId);
       const response = await api.get(`/videos/${videoId}/qr-download`, {
@@ -91,15 +91,26 @@ function QRCodeStorage() {
         throw new Error('Empty response from server');
       }
       
+      // Generate filename from Grade + Lesson + Unit in format G1_L1_U1_M1.png
+      const parts = [];
+      if (videoData?.grade) parts.push(`G${videoData.grade}`);
+      if (videoData?.lesson) parts.push(`L${videoData.lesson}`);
+      if (videoData?.course) parts.push(`U${videoData.course}`); // Using course as unit
+      if (videoData?.module) parts.push(`M${videoData.module}`);
+      
+      const filename = parts.length > 0 
+        ? parts.join('_') + '.png'
+        : `${videoId}_qr_code.png`;
+      
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `${title || videoId}_qr_code.png`);
+      link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      console.log('QR code downloaded successfully');
+      console.log('QR code downloaded successfully as:', filename);
     } catch (err) {
       console.error('Failed to download QR code:', err);
       const errorMessage = err.response?.data?.message || err.message || 'Unknown error';
@@ -286,7 +297,7 @@ function QRCodeStorage() {
                 {/* Actions */}
                 <div className="flex gap-2.5 pt-4 border-t-2 border-slate-200">
                   <button
-                    onClick={() => handleDownloadQR(item.videoId, item.title)}
+                    onClick={() => handleDownloadQR(item.videoId, item)}
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all font-bold text-sm shadow-lg hover:shadow-xl transform hover:scale-105"
                   >
                     <Download className="w-4 h-4" />

@@ -5,8 +5,10 @@
 export const getApiBaseUrl = () => {
   const envUrl = import.meta.env.VITE_API_URL;
   
+  // Default to /api if not set (works with Vite proxy in development)
   if (!envUrl) {
-    throw new Error('VITE_API_URL environment variable is not set. Please set it in your .env file.');
+    console.warn('VITE_API_URL environment variable is not set. Using default: /api');
+    return '/api';
   }
   
   // If it's already an absolute URL (starts with http:// or https://), use it as-is

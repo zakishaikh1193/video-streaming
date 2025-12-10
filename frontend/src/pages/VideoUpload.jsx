@@ -1,28 +1,30 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Video, Image, XCircle, CheckCircle, Info, FileVideo, FileImage } from 'lucide-react';
+import { Upload, Video, XCircle, CheckCircle, Info, FileVideo, Hash, Link as LinkIcon } from 'lucide-react';
 import api from '../services/api';
+import { getBackendBaseUrl } from '../utils/apiConfig';
 
 function VideoUpload() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
+    course: '',
     grade: '',
+    unit: '',
     lesson: '',
-    topic: '',
+    module: '',
     title: '',
     description: '',
     language: 'en'
   });
   const [file, setFile] = useState(null);
-  const [thumbnailFile, setThumbnailFile] = useState(null);
-  const [thumbnailPreview, setThumbnailPreview] = useState(null);
+  const [draftId, setDraftId] = useState('');
+  const [plannedPath, setPlannedPath] = useState('');
+  const [previewUrl, setPreviewUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState('');
   const [dragActive, setDragActive] = useState(false);
-  const [thumbnailDragActive, setThumbnailDragActive] = useState(false);
   const fileInputRef = useRef(null);
-  const thumbnailInputRef = useRef(null);
 
   const handleChange = (e) => {
     setFormData({
@@ -33,34 +35,28 @@ function VideoUpload() {
 
   const handleFileChange = (file) => {
     if (file) {
+      const extMatch = file.name.match(/\.[^/.]+$/);
+      const ext = extMatch ? extMatch[0] : '.mp4';
+      // Strong and short ID: timestamp (5 chars) + random (5 chars) = 10 chars total
+      const timestamp = Date.now().toString(36).slice(-5).toUpperCase();
+      const random = Math.random().toString(36).slice(2, 7).toUpperCase();
+      const newId = `VID_${timestamp}${random}`;
+      const backendBase = getBackendBaseUrl();
+      setDraftId(newId);
+      setPlannedPath(`upload/${newId}${ext}`);
+      setPreviewUrl(`${backendBase}/api/s/${newId}`);
       setFile(file);
+    } else {
+      setFile(null);
+      setDraftId('');
+      setPlannedPath('');
+      setPreviewUrl('');
     }
   };
 
   const handleFileInputChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       handleFileChange(e.target.files[0]);
-    }
-  };
-
-  const handleThumbnailChange = (file) => {
-    if (file) {
-      setThumbnailFile(file);
-      // Create preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setThumbnailPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      setThumbnailFile(null);
-      setThumbnailPreview(null);
-    }
-  };
-
-  const handleThumbnailInputChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleThumbnailChange(e.target.files[0]);
     }
   };
 
@@ -87,27 +83,6 @@ function VideoUpload() {
     }
   };
 
-  const handleThumbnailDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setThumbnailDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setThumbnailDragActive(false);
-    }
-  };
-
-  const handleThumbnailDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setThumbnailDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile.type.startsWith('image/')) {
-        handleThumbnailChange(droppedFile);
-      }
-    }
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -125,13 +100,15 @@ function VideoUpload() {
     try {
       const uploadData = new FormData();
       uploadData.append('video', file);
-      // Add thumbnail if provided
-      if (thumbnailFile) {
-        uploadData.append('thumbnail', thumbnailFile);
-      }
+      if (draftId) uploadData.append('videoId', draftId);
+      if (plannedPath) uploadData.append('plannedPath', plannedPath);
       Object.keys(formData).forEach(key => {
         uploadData.append(key, formData[key]);
       });
+      // Also send unit if provided (will be stored in course field if course is empty)
+      if (formData.unit) {
+        uploadData.append('unit', formData.unit);
+      }
 
       const response = await api.post('/videos/upload', uploadData, {
         headers: {
@@ -193,7 +170,7 @@ function VideoUpload() {
           </div>
           <div className="flex-1">
             <p className="text-sm text-blue-800 font-semibold mb-1">
-              <strong>Hierarchy:</strong> Grade → Lesson
+              <strong>Hierarchy:</strong> Course → Grade → Unit → Lesson → Module
             </p>
             <p className="text-xs text-blue-700">All fields are optional. Fill in what applies to your video.</p>
           </div>
@@ -205,6 +182,20 @@ function VideoUpload() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-3">
+                Course
+              </label>
+              <input
+                type="text"
+                name="course"
+                value={formData.course}
+                onChange={handleChange}
+                placeholder="e.g., Course Name"
+                className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-3">
                 Grade
               </label>
               <input
@@ -213,6 +204,20 @@ function VideoUpload() {
                 value={formData.grade}
                 onChange={handleChange}
                 placeholder="e.g., Grade 3 or Grade Name"
+                className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-3">
+                Unit
+              </label>
+              <input
+                type="text"
+                name="unit"
+                value={formData.unit}
+                onChange={handleChange}
+                placeholder="e.g., Unit 1 or Unit Name"
                 className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
               />
             </div>
@@ -233,17 +238,18 @@ function VideoUpload() {
 
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-3">
-                Topic
+                Module
               </label>
               <input
                 type="text"
-                name="topic"
-                value={formData.topic}
+                name="module"
+                value={formData.module}
                 onChange={handleChange}
-                placeholder="Optional"
+                placeholder="e.g., Module 1 or Module Name"
                 className="w-full px-4 py-[14px] text-[15px] border border-[#D9DCE3] rounded-[12px] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-[#3B82F6] bg-white transition-all duration-200 hover:border-slate-400"
               />
             </div>
+
           </div>
         </div>
 
@@ -344,6 +350,9 @@ function VideoUpload() {
                   onClick={(e) => {
                     e.stopPropagation();
                     setFile(null);
+                    setDraftId('');
+                    setPlannedPath('');
+                    setPreviewUrl('');
                     if (fileInputRef.current) fileInputRef.current.value = '';
                   }}
                   className="ml-auto p-2 hover:bg-red-50 rounded-lg transition-colors"
@@ -355,78 +364,30 @@ function VideoUpload() {
           </div>
         </div>
 
-        {/* Modern drag-and-drop thumbnail upload area */}
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-3">
-            Custom Thumbnail <span className="text-slate-400 font-normal">(Optional)</span>
-          </label>
-          <div
-            onDragEnter={handleThumbnailDrag}
-            onDragLeave={handleThumbnailDrag}
-            onDragOver={handleThumbnailDrag}
-            onDrop={handleThumbnailDrop}
-            onClick={() => thumbnailInputRef.current?.click()}
-            className={`relative border-2 border-dashed rounded-[12px] p-8 text-center cursor-pointer transition-all duration-300 ${
-              thumbnailDragActive
-                ? 'border-[#3B82F6] bg-blue-50/50 shadow-[0_0_0_4px_rgba(59,130,246,0.1)]'
-                : 'border-[#D9DCE3] bg-slate-50/50 hover:border-[#3B82F6] hover:bg-blue-50/30 hover:shadow-[0_0_0_4px_rgba(59,130,246,0.05)]'
-            } ${thumbnailFile ? 'border-green-300 bg-green-50/30' : ''} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <input
-              ref={thumbnailInputRef}
-              type="file"
-              accept="image/jpeg,image/jpg,image/png,image/webp"
-              onChange={handleThumbnailInputChange}
-              disabled={loading}
-              className="hidden"
-            />
-            {!thumbnailFile ? (
-              <div className="flex flex-col items-center gap-3">
-                <div className={`p-4 rounded-full bg-white shadow-sm transition-transform duration-300 ${thumbnailDragActive ? 'scale-110' : ''}`}>
-                  <FileImage className={`w-8 h-8 ${thumbnailDragActive ? 'text-[#3B82F6]' : 'text-slate-400'}`} />
-                </div>
-                <div>
-                  <p className="text-[15px] font-semibold text-slate-700 mb-1">
-                    Drop thumbnail image here or click to browse
-                  </p>
-                  <p className="text-xs text-slate-500">JPEG, PNG, or WebP formats</p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-4">
-                <div className="relative">
-                  <img
-                    src={thumbnailPreview}
-                    alt="Thumbnail preview"
-                    className="w-48 h-32 object-cover rounded-[12px] border-2 border-slate-200 shadow-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setThumbnailFile(null);
-                      setThumbnailPreview(null);
-                      if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
-                    }}
-                    className="absolute -top-2 -right-2 p-1.5 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors shadow-lg"
-                  >
-                    <XCircle className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  <div className="text-center">
-                    <p className="text-sm font-semibold text-green-800">{thumbnailFile.name}</p>
-                    <p className="text-xs text-green-600">{(thumbnailFile.size / 1024).toFixed(2)} KB</p>
-                  </div>
-                </div>
-              </div>
-            )}
+        {/* Draft ID and URL preview */}
+        {file && (
+          <div className="bg-gradient-to-r from-slate-50 to-blue-50 border border-blue-200/60 rounded-xl p-4 flex flex-col gap-2 text-sm text-slate-800">
+            <div className="flex items-center gap-2">
+              <Hash className="w-4 h-4 text-blue-600" />
+              <span className="font-semibold">Draft ID:</span>
+              <code className="bg-white border border-slate-200 px-2 py-1 rounded text-xs font-mono">{draftId}</code>
+            </div>
+            <div className="flex items-center gap-2">
+              <LinkIcon className="w-4 h-4 text-blue-600" />
+              <span className="font-semibold">Planned URL:</span>
+              <span className="break-all text-blue-700">{previewUrl}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Video className="w-4 h-4 text-blue-600" />
+              <span className="font-semibold">Planned Path:</span>
+              <code className="bg-white border border-slate-200 px-2 py-1 rounded text-xs font-mono">{plannedPath}</code>
+            </div>
+            <div className="text-xs text-slate-600">
+              Note: Only the ID is used for uniqueness; Course/Grade/Unit/Lesson/Module are informational.
+            </div>
           </div>
-          <p className="mt-3 text-xs text-slate-500 text-center">
-            If not provided, a thumbnail will be automatically generated from the video.
-          </p>
-        </div>
+        )}
+
 
         {/* Upload Progress Bar */}
         {loading && (

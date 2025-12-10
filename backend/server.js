@@ -9,7 +9,6 @@ import videoRoutes from './routes/videoRoutes.js';
 import redirectRoutes from './routes/redirectRoutes.js';
 import streamingRoutes from './routes/streamingRoutes.js';
 import captionRoutes from './routes/captionRoutes.js';
-import subtitleRoutes from './routes/subtitleRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import cloudflareRoutes from './routes/cloudflareRoutes.js';
@@ -58,8 +57,6 @@ app.use('/qr-codes', express.static(path.join(__dirname, '../qr-codes')));
 app.use('/thumbnails', express.static(path.join(__dirname, '../video-storage/thumbnails')));
 // Serve uploaded videos from backend/upload folder
 app.use('/upload', express.static(path.join(__dirname, 'upload')));
-// Serve subtitle files from public/subtitles folder
-app.use('/subtitles', express.static(path.join(__dirname, '../public/subtitles')));
 
 // Log all API requests
 app.use('/api', (req, res, next) => {
@@ -76,7 +73,6 @@ app.use('/api', (req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/captions', captionRoutes);
-app.use('/api/subtitles', subtitleRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/cloudflare', cloudflareRoutes);
@@ -155,8 +151,8 @@ async function testDatabaseConnection() {
   }
 }
 
-// Start server (allow env override)
-const PORT = process.env.PORT || config.port || 5000;
+// Start server
+const PORT = config.port;
 
 // Test database connection before starting server
 testDatabaseConnection().then((connected) => {

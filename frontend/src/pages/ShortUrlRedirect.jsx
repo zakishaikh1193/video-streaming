@@ -238,26 +238,6 @@ function ShortUrlRedirect() {
     streamingUrl = `${backendUrl}/s/${streamIdentifier}`;
   }
 
-  // Build captions array for CC (supports different backend field names)
-  const captions = (() => {
-    if (video?.captions && Array.isArray(video.captions)) return video.captions;
-    const candidates = [
-      video?.captions_url,
-      video?.caption_url,
-      video?.subtitle_url,
-      video?.subtitles_url
-    ].filter(Boolean);
-    if (candidates.length > 0) {
-      return [{
-        src: candidates[0],
-        label: 'English',
-        language: 'en',
-        default: true
-      }];
-    }
-    return [];
-  })();
-
   return (
     <>
       <style>{`
@@ -406,6 +386,11 @@ function ShortUrlRedirect() {
           margin-left: 8px !important;
           order: 6 !important;
         }
+        /* Hide captions button completely */
+        .video-js .vjs-subs-caps-button {
+          display: none !important;
+          visibility: hidden !important;
+        }
         /* Ensure big play button works */
         .video-js .vjs-big-play-button {
           cursor: pointer !important;
@@ -499,15 +484,80 @@ function ShortUrlRedirect() {
           <div className="w-full h-full flex relative">
             {/* Video Player - 75% width on left */}
             <div className="w-3/4 h-full relative" style={{ position: 'relative', zIndex: 1 }}>
-          <VideoPlayer 
-            src={streamingUrl} 
-            captions={captions}
-            autoplay={true}
-            videoId={video.video_id || slug}
-          />
-              <div>
-                    <div className="text-xs uppercase text-gray-400 mb-2 ml-20">DESCRIPTION</div>
-                    <div className="w-full px-3 py-2.5 text-sm text-gray-300 bg-gray-900 border border-gray-700 rounded-lg min-h-[100px] ml-20">
+              <VideoPlayer 
+                src={streamingUrl} 
+                captions={video.captions || []} 
+                autoplay={true}
+                videoId={video.video_id || slug}
+              />
+            </div>
+            
+            {/* Subject Information Container - 25% width on right */}
+            <div className="w-1/4 h-full bg-black border-l border-gray-800 overflow-y-auto subject-info-panel" style={{ userSelect: 'none' }}>
+              <div className="p-6">
+                {/* Header */}
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-1 h-6 bg-blue-600 rounded"></div>
+                    <h2 className="text-lg font-bold text-white">Subject Information</h2>
+                  </div>
+                </div>
+
+                {/* Subject Information Fields */}
+                <div className="space-y-4">
+                  {/* Subject */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">SUBJECT</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {(() => {
+                        const subjectValue = video.subject || video.course || '';
+                        return subjectValue !== null && subjectValue !== undefined && subjectValue !== '' ? String(subjectValue) : '-';
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Grade */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">GRADE</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {video.grade !== null && video.grade !== undefined && video.grade !== '' ? String(video.grade) : '-'}
+                    </div>
+                  </div>
+
+                  {/* Unit */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">UNIT</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {(() => {
+                        const unitValue = video.unit;
+                        return unitValue !== null && unitValue !== undefined && unitValue !== '' && unitValue !== 0 && unitValue !== '0' ? String(unitValue) : '-';
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Lesson */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">LESSON</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {video.lesson !== null && video.lesson !== undefined && video.lesson !== '' ? String(video.lesson) : '-'}
+                    </div>
+                  </div>
+
+                  {/* Module */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">MODULE</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {(() => {
+                        const moduleValue = video.module;
+                        return moduleValue !== null && moduleValue !== undefined && moduleValue !== '' && moduleValue !== 0 && moduleValue !== '0' ? String(moduleValue) : '-';
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">DESCRIPTION</div>
+                    <div className="w-full px-3 py-2.5 text-sm text-gray-300 bg-gray-900 border border-gray-700 rounded-lg min-h-[100px]">
                       {video.description && video.description.trim() !== '' ? (
                         <div className="whitespace-pre-wrap break-words">{video.description}</div>
                       ) : (
@@ -515,6 +565,8 @@ function ShortUrlRedirect() {
                       )}
                     </div>
                   </div>
+                </div>
+              </div>
             </div>
             
             {/* Error Messages */}

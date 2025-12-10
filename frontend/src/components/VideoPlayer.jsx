@@ -705,6 +705,31 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
             }
           }
         };
+        
+        // Function to manually set subtitle URL
+        window.setSubtitleUrl = (vttUrl) => {
+          const videoEl = player.el().querySelector('video');
+          const track = videoEl?.querySelector('#subtitle-track');
+          if (track && vttUrl) {
+            track.setAttribute('src', vttUrl);
+            track.src = vttUrl;
+            console.log('✅ Subtitle URL set to:', vttUrl);
+            
+            // Reload track and enable
+            if (videoEl.textTracks && videoEl.textTracks.length > 0) {
+              for (let i = 0; i < videoEl.textTracks.length; i++) {
+                const t = videoEl.textTracks[i];
+                if (t.kind === 'subtitles' || t.kind === 'captions') {
+                  t.mode = 'showing';
+                  console.log('✅ Track enabled');
+                }
+              }
+            }
+            return true;
+          }
+          console.error('❌ Could not set subtitle URL - track:', track, 'vttUrl:', vttUrl);
+          return false;
+        };
       }
 
       // Make sure player fills container
@@ -745,18 +770,24 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
         videoEl.setAttribute('controlsList', 'nodownload noplaybackrate');
 
         // Apply subtitles if captions are provided
+        console.log('[VideoPlayer] Captions prop:', captions);
         if (captions && Array.isArray(captions) && captions.length > 0) {
           const firstCaption = captions[0];
           const vttUrl = firstCaption.src || firstCaption.url;
+          console.log('[VideoPlayer] First caption:', firstCaption);
+          console.log('[VideoPlayer] Extracted VTT URL:', vttUrl);
+          
           if (vttUrl) {
-            console.log('[VideoPlayer] Applying subtitles, VTT URL:', vttUrl);
+            console.log('[VideoPlayer] ✅ Applying subtitles, VTT URL:', vttUrl);
             
             // Apply subtitle to the track element
             const trackEl = videoEl.querySelector('#subtitle-track');
             if (trackEl) {
-              // Set track src
+              // Set track src using both methods to ensure it works
+              trackEl.setAttribute('src', vttUrl);
               trackEl.src = vttUrl;
-              console.log('[VideoPlayer] Track src set to:', trackEl.src);
+              console.log('[VideoPlayer] ✅ Track src set to:', trackEl.src);
+              console.log('[VideoPlayer] Track src attribute:', trackEl.getAttribute('src'));
               
               // Function to enable text tracks with retries
               const enableTrack = (attempt = 0) => {
@@ -835,10 +866,37 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
               console.error('[VideoPlayer] ❌ Subtitle track element not found!');
             }
           } else {
-            console.warn('[VideoPlayer] ⚠️ No VTT URL in captions');
+            console.warn('[VideoPlayer] ⚠️ No VTT URL in captions. First caption:', firstCaption);
           }
         } else {
-          console.log('[VideoPlayer] ℹ️ No captions provided');
+          console.log('[VideoPlayer] ℹ️ No captions provided. Captions value:', captions);
+          console.log('[VideoPlayer] ℹ️ Video object:', video);
+          
+          // Check if video has subtitle URL directly
+          if (video && (video.subtitle_url || video.captions_url || video.caption_url || video.subtitles_url)) {
+            const vttUrl = video.subtitle_url || video.captions_url || video.caption_url || video.subtitles_url;
+            console.log('[VideoPlayer] ℹ️ Found subtitle URL in video object:', vttUrl);
+            
+            const trackEl = videoEl.querySelector('#subtitle-track');
+            if (trackEl && vttUrl) {
+              trackEl.setAttribute('src', vttUrl);
+              trackEl.src = vttUrl;
+              console.log('[VideoPlayer] ✅ Set track src from video object:', vttUrl);
+              
+              // Enable track
+              setTimeout(() => {
+                const textTracks = videoEl.textTracks;
+                if (textTracks && textTracks.length > 0) {
+                  for (let i = 0; i < textTracks.length; i++) {
+                    if (textTracks[i].kind === 'subtitles' || textTracks[i].kind === 'captions') {
+                      textTracks[i].mode = 'showing';
+                      console.log('[VideoPlayer] ✅ Track enabled from video object');
+                    }
+                  }
+                }
+              }, 1000);
+            }
+          }
         }
       }
 

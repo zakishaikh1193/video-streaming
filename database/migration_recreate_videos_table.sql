@@ -31,8 +31,7 @@ CREATE TABLE videos (
   redirect_slug VARCHAR(100) NULL UNIQUE,
   duration INT DEFAULT 0 COMMENT 'Duration in seconds',
   size BIGINT DEFAULT 0 COMMENT 'File size in bytes',
-  version INT DEFAULT 1,
-  views INT DEFAULT 0 COMMENT 'Number of times video has been viewed',
+  version DECIMAL(10, 1) DEFAULT 1.1,
   status VARCHAR(50) DEFAULT 'active',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -44,8 +43,7 @@ CREATE TABLE videos (
   INDEX idx_module (module),
   INDEX idx_status (status),
   INDEX idx_redirect_slug (redirect_slug),
-  INDEX idx_grade_unit_lesson (grade, unit, lesson),
-  INDEX idx_views (views)
+  INDEX idx_grade_unit_lesson (grade, unit, lesson)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Re-enable foreign key checks

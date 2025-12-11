@@ -1087,7 +1087,7 @@ export async function updateVideo(id, updates) {
   
   const allowedFields = [
     'title', 'description', 'language', 'status',
-    'subject', 'course', 'grade', 'unit', 'lesson', 'module',
+    'subject', 'course', 'grade', 'unit', 'lesson', 'module', 'version',
     'streaming_url', 'file_path', 'thumbnail_url'
   ];
   
@@ -1096,6 +1096,7 @@ export async function updateVideo(id, updates) {
   const hasCourseColumn = await columnExists('course');
   const hasModuleColumn = await columnExists('module');
   const hasUnitColumn = await columnExists('unit');
+  const hasVersionColumn = await columnExists('version');
   
   // Helper function to safely convert values to strings, preserving non-empty values
   const safeStringValue = (val) => {
@@ -1112,7 +1113,8 @@ export async function updateVideo(id, updates) {
   console.log('[updateVideo] Column existence:', {
     subject: hasSubjectColumn,
     module: hasModuleColumn,
-    unit: hasUnitColumn
+    unit: hasUnitColumn,
+    version: hasVersionColumn
   });
   
   for (const [key, value] of Object.entries(updates)) {
@@ -1130,7 +1132,7 @@ export async function updateVideo(id, updates) {
       }
       
       // Skip updating columns that don't exist (except subject/course which are handled above)
-      if ((key === 'module' && !hasModuleColumn) || (key === 'unit' && !hasUnitColumn)) {
+      if ((key === 'module' && !hasModuleColumn) || (key === 'unit' && !hasUnitColumn) || (key === 'version' && !hasVersionColumn)) {
         console.warn(`[updateVideo] Column ${key} does not exist, skipping update`);
         continue;
       }
@@ -1138,9 +1140,20 @@ export async function updateVideo(id, updates) {
       // Convert value to string and preserve non-empty values
       // Special handling: preserve actual values including "0", "1", etc.
       // CRITICAL: Empty strings should be explicitly set to NULL in database
+      // Special handling for version: support floating point numbers
       let processedValue;
       if (value === null || value === undefined || value === '') {
         processedValue = null;
+      } else if (key === 'version') {
+        // For version field, support both integers and floating point numbers
+        const numValue = typeof value === 'number' ? value : parseFloat(value);
+        if (!isNaN(numValue) && isFinite(numValue)) {
+          processedValue = numValue; // Keep as number for database
+        } else {
+          // If not a valid number, convert to string
+          const str = String(value).trim();
+          processedValue = str !== '' ? str : null;
+        }
       } else {
         const str = String(value).trim();
         // Preserve the value if it's not empty, including "0" and "1"
@@ -1152,7 +1165,7 @@ export async function updateVideo(id, updates) {
       fields.push(`${dbColumn} = ?`);
       values.push(processedValue);
       
-      console.log(`[updateVideo] Adding field: ${dbColumn} = ${processedValue === null ? 'NULL' : `"${processedValue}"`} (original: ${JSON.stringify(value)}, type: ${typeof value})`);
+      console.log(`[updateVideo] Adding field: ${dbColumn} = ${processedValue === null ? 'NULL' : (typeof processedValue === 'number' ? processedValue : `"${processedValue}"`)} (original: ${JSON.stringify(value)}, type: ${typeof value})`);
     }
   }
   

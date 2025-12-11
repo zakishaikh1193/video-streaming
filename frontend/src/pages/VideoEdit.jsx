@@ -24,6 +24,7 @@ function VideoEdit() {
     unit: '',
     lesson: '',
     module: '',
+    version: '',
     streaming_url: '',
     file_path: ''
   });
@@ -51,6 +52,28 @@ function VideoEdit() {
           return String(value);
         };
         
+        // Helper function specifically for version to preserve floating point numbers
+        const safeVersionValue = (value) => {
+          if (value === null || value === undefined || value === '') return '';
+          // If it's already a number (including floating point), convert to string for input
+          // Use toString() to preserve decimal places (e.g., 1.5 stays as "1.5")
+          if (typeof value === 'number') {
+            return value.toString();
+          }
+          // If it's a string that represents a number, validate and return it
+          // This handles cases where the database returns it as a string
+          const numValue = parseFloat(value);
+          if (!isNaN(numValue) && isFinite(numValue)) {
+            // Preserve the original string format if it has decimals, otherwise use parsed value
+            if (String(value).includes('.') && !isNaN(parseFloat(value))) {
+              return String(value).trim();
+            }
+            return numValue.toString();
+          }
+          // Otherwise return as string
+          return String(value);
+        };
+        
         setFormData({
           title: foundVideo.title || '',
           description: foundVideo.description || '',
@@ -62,6 +85,7 @@ function VideoEdit() {
           unit: safeStringValue(foundVideo.unit),
           lesson: safeStringValue(foundVideo.lesson),
           module: safeStringValue(foundVideo.module),
+          version: safeVersionValue(foundVideo.version),
           streaming_url: foundVideo.streaming_url || '',
           file_path: foundVideo.file_path || ''
         });
@@ -76,6 +100,7 @@ function VideoEdit() {
           unit: foundVideo.unit,
           lesson: foundVideo.lesson,
           module: foundVideo.module,
+          version: foundVideo.version,
           allKeys: Object.keys(foundVideo)
         });
       } else {
@@ -89,10 +114,22 @@ function VideoEdit() {
   };
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    const { name, value, type } = e.target;
+    
+    // For number inputs (like version), preserve the value as-is
+    // This allows decimal numbers to be entered properly (e.g., "1.5", "2.3")
+    if (type === 'number') {
+      // Allow empty string, or valid number strings (including decimals)
+      setFormData({
+        ...formData,
+        [name]: value === '' ? '' : value
+      });
+    } else {
+      setFormData({
+        ...formData,
+        [name]: value
+      });
+    }
   };
 
   const handleFileChange = (e) => {
@@ -175,13 +212,36 @@ function VideoEdit() {
         updateData.unit = null;
       }
       
+      // Handle version - support floating point numbers
+      if (updateData.version === '' || updateData.version === null || updateData.version === undefined) {
+        updateData.version = null;
+      } else {
+        // Convert string to number if it's a valid number (including floating point)
+        // The value from number input is always a string, so we need to parse it
+        const versionStr = String(updateData.version).trim();
+        if (versionStr === '') {
+          updateData.version = null;
+        } else {
+          const versionNum = parseFloat(versionStr);
+          if (!isNaN(versionNum) && isFinite(versionNum)) {
+            // Preserve as number (supports both integers and floating point)
+            updateData.version = versionNum;
+          } else {
+            // If it's not a valid number but not empty, keep as string
+            updateData.version = versionStr;
+          }
+        }
+      }
+      
       // Log what we're sending
       console.log('[VideoEdit] Sending update data:', {
         subject: updateData.subject,
         module: updateData.module,
         unit: updateData.unit,
         grade: updateData.grade,
-        lesson: updateData.lesson
+        lesson: updateData.lesson,
+        version: updateData.version,
+        versionType: typeof updateData.version
       });
 
       await api.put(`/videos/${id}`, updateData);
@@ -442,6 +502,20 @@ function VideoEdit() {
                       placeholder="Module"
                       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
                     />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2.5">Version</label>
+                    <input
+                      type="number"
+                      step="any"
+                      name="version"
+                      value={formData.version}
+                      onChange={handleChange}
+                      className="w-full px-4 py-3.5 text-[15px] border-2 border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white hover:border-slate-300"
+                      placeholder="Version (e.g., 1, 1.5, 2.3)"
+                      style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
+                    />
+                    <p className="text-xs text-slate-500 mt-1">Supports whole numbers and decimals (e.g., 1, 1.5, 2.3)</p>
                   </div>
                 </div>
               </div>

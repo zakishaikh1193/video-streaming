@@ -19,6 +19,7 @@ function CSVExport() {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
   const [videoCount, setVideoCount] = useState(0);
+  const [counting, setCounting] = useState(false);
 
   useEffect(() => {
     loadFilterValues();
@@ -54,25 +55,42 @@ function CSVExport() {
 
   const countVideos = async () => {
     try {
-      const filters = {};
+      setCounting(true);
+      // Build filters exactly like the CSV export endpoint
+      const params = {};
       if (selectedFilters.subject !== 'all') {
-        filters.subject = selectedFilters.subject;
+        params.subject = selectedFilters.subject;
       }
       if (selectedFilters.grade !== 'all') {
-        filters.grade = selectedFilters.grade;
+        params.grade = selectedFilters.grade;
       }
       if (selectedFilters.unit !== 'all') {
-        filters.unit = selectedFilters.unit;
+        params.unit = selectedFilters.unit;
       }
       if (selectedFilters.lesson !== 'all') {
-        filters.lesson = selectedFilters.lesson;
+        params.lesson = selectedFilters.lesson;
       }
 
-      const response = await api.get('/videos', { params: filters });
-      setVideoCount(response.data?.length || 0);
+      // Use the same endpoint logic as CSV export - get filtered videos
+      // This ensures the count matches exactly what will be in the CSV
+      const response = await api.get('/videos', { 
+        params: {
+          ...params,
+          status: 'active' // Only count active videos (same as CSV export)
+        }
+      });
+      
+      // Count only videos that have redirect_slug (QR codes) - same as CSV export should include
+      const videosWithQR = response.data?.filter(video => 
+        video.redirect_slug && video.redirect_slug.trim() !== ''
+      ) || [];
+      
+      setVideoCount(videosWithQR.length);
     } catch (err) {
       console.error('Failed to count videos:', err);
       setVideoCount(0);
+    } finally {
+      setCounting(false);
     }
   };
 
@@ -302,11 +320,18 @@ function CSVExport() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-6 border-t-2 border-slate-200">
             <div className="flex items-center gap-4">
               <div className="px-5 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border-2 border-blue-200 shadow-sm">
-                <span className="text-sm font-bold text-blue-700">
-                  {videoCount} {videoCount === 1 ? 'Video' : 'Videos'} Found
-                </span>
+                {counting ? (
+                  <div className="flex items-center gap-2">
+                    <Loader className="w-4 h-4 animate-spin text-blue-600" />
+                    <span className="text-sm font-bold text-blue-700">Counting...</span>
+                  </div>
+                ) : (
+                  <span className="text-sm font-bold text-blue-700">
+                    {videoCount} {videoCount === 1 ? 'Video' : 'Videos'} Found
+                  </span>
+                )}
               </div>
-              {(selectedFilters.subject !== 'all' || selectedFilters.grade !== 'all' || selectedFilters.lesson !== 'all') && (
+              {(selectedFilters.subject !== 'all' || selectedFilters.grade !== 'all' || selectedFilters.unit !== 'all' || selectedFilters.lesson !== 'all') && (
                 <button
                   onClick={resetFilters}
                   className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-semibold text-sm"

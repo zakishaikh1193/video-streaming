@@ -2064,19 +2064,22 @@ export async function getAllQRCodes(req, res) {
     // Ensure required columns exist to avoid ER_BAD_FIELD_ERROR
     await ensureQrColumns();
 
-    console.log('[Get All QR Codes] Fetching all videos with QR codes');
+    console.log('[Get All QR Codes] Fetching videos with short link QR codes only');
     
     // Use SELECT * to get all columns, then map them in code
     // This avoids issues with missing columns in the database
+    // Only return videos that have redirect_slug (short link format)
+    // This ensures we only show QR codes for videos with short links (not backend-generated ones)
     const query = `
       SELECT * 
       FROM videos 
       WHERE status = 'active' 
-        AND (qr_url IS NOT NULL OR redirect_slug IS NOT NULL)
+        AND redirect_slug IS NOT NULL
+        AND redirect_slug != ''
       ORDER BY created_at DESC
     `;
     
-    console.log('[Get All QR Codes] Executing query');
+    console.log('[Get All QR Codes] Executing query - only videos with redirect_slug');
     const [videos] = await pool.execute(query);
     
     // Build QR code data with short URLs
@@ -2084,10 +2087,8 @@ export async function getAllQRCodes(req, res) {
     const frontendUrl = config.urls?.frontend || 'http://localhost:5173';
     const qrCodes = videos.map(video => {
       // Use redirect slug format: {frontendUrl}/{redirect_slug}
-      // If no redirect_slug, fallback to video page link
-      const shortUrl = video.redirect_slug 
-        ? `${frontendUrl}/${video.redirect_slug}`
-        : `${frontendUrl}/stream/${video.video_id}`;
+      // Only videos with redirect_slug are included, so this will always be the short link format
+      const shortUrl = `${frontendUrl}/${video.redirect_slug}`;
       
       return {
         videoId: video.video_id,
@@ -2160,26 +2161,54 @@ export async function downloadQRCode(req, res) {
       return res.status(404).json({ error: 'Video not found' });
     }
     
+    // Only allow download for videos with redirect_slug (short link format)
+    if (!video.redirect_slug) {
+      return res.status(400).json({ 
+        error: 'Video does not have a short link', 
+        message: 'Only videos with short links can have QR codes downloaded' 
+      });
+    }
+    
+    // Generate filename in format G{grade}_U{unit}_L{lesson}_M{module}.png
+    // Order: Grade, Unit, Lesson, Module (G_U_L_M)
+    const parts = [];
+    if (video.grade !== null && video.grade !== undefined && String(video.grade).trim() !== '') {
+      parts.push(`G${video.grade}`);
+    }
+    if (video.unit !== null && video.unit !== undefined && String(video.unit).trim() !== '') {
+      parts.push(`U${video.unit}`);
+    }
+    if (video.lesson !== null && video.lesson !== undefined && String(video.lesson).trim() !== '') {
+      parts.push(`L${video.lesson}`);
+    }
+    if (video.module !== null && video.module !== undefined && String(video.module).trim() !== '') {
+      parts.push(`M${video.module}`);
+    }
+    
+    const filename = parts.length > 0 
+      ? parts.join('_') + '.png'
+      : `${videoId}_qr_code.png`;
+    
     // Download QR code using service
     try {
       const qrBuffer = await qrCodeService.downloadQRCode(videoId);
       
       // Set headers for file download
       res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Content-Disposition', `attachment; filename="${videoId}_qr_code.png"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.setHeader('Content-Length', qrBuffer.length);
       
-      console.log(`[Download QR Code] ✓ Sending QR code file for video: ${videoId}`);
+      console.log(`[Download QR Code] ✓ Sending QR code file for video: ${videoId} as ${filename}`);
       res.send(qrBuffer);
     } catch (qrError) {
       // If QR code file doesn't exist, try to generate it
       if (qrError.message.includes('not found') || qrError.code === 'ENOENT') {
         console.log(`[Download QR Code] QR code file not found, generating new one for: ${videoId}`);
         
-        // Build short URL
-        const shortUrl = video.redirect_slug 
-          ? `${config.urls.base}/s/${video.redirect_slug}`
-          : video.streaming_url || `${config.urls.frontend}/stream/${videoId}`;
+        // Build short URL using redirect_slug format: http://localhost:5173/{redirect_slug}
+        // This matches the format shown on the video page
+        const frontendUrl = config.urls?.frontend || 'http://localhost:5173';
+        const shortUrl = `${frontendUrl}/${video.redirect_slug}`;
         
         // Generate QR code
         const qrUrl = await qrCodeService.generateQRCode(videoId, shortUrl);
@@ -2189,10 +2218,10 @@ export async function downloadQRCode(req, res) {
         
         // Set headers for file download
         res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Content-Disposition', `attachment; filename="${videoId}_qr_code.png"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Length', qrBuffer.length);
         
-        console.log(`[Download QR Code] ✓ Generated and sent QR code for video: ${videoId}`);
+        console.log(`[Download QR Code] ✓ Generated and sent QR code for video: ${videoId} as ${filename}`);
         res.send(qrBuffer);
       } else {
         throw qrError;
@@ -2553,8 +2582,13 @@ export async function generateFilteredVideosCSV(req, res) {
       filters.lesson = lesson;
     }
     
-    // Get filtered videos
-    const videos = await videoService.getAllVideos(filters);
+    // Get filtered videos - only include videos with redirect_slug (QR codes)
+    const allVideos = await videoService.getAllVideos(filters);
+    
+    // Filter to only videos with redirect_slug (QR codes) - same as QR Code Storage
+    const videos = allVideos.filter(video => 
+      video.redirect_slug && video.redirect_slug.trim() !== ''
+    );
     
     if (videos.length === 0) {
       return res.status(400).json({ error: 'No videos found matching the selected filters' });
@@ -2580,20 +2614,20 @@ export async function generateFilteredVideosCSV(req, res) {
       // Lesson
       const lessonValue = video.lesson || '';
       
-      // QR code name - generate filename in format G{grade}_L{lesson}_U{course}_M{module}.png (same as download)
+      // QR code name - generate filename in format G{grade}_U{unit}_L{lesson}_M{module}.png (same as download)
       // This matches the exact filename format used when downloading QR codes from QR Code Storage
-      // Format: G1_L1_Uw_M1.png - this is the QR code download filename with .png extension
+      // Format: G1_U1_L1_M1.png - this is the QR code download filename with .png extension
+      // Order: Grade, Unit, Lesson, Module (G_U_L_M)
       const parts = [];
       if (video.grade !== null && video.grade !== undefined && String(video.grade).trim() !== '') {
         parts.push(`G${video.grade}`);
       }
+      // Use unit field for U part (not course/subject)
+      if (video.unit !== null && video.unit !== undefined && String(video.unit).trim() !== '') {
+        parts.push(`U${video.unit}`);
+      }
       if (video.lesson !== null && video.lesson !== undefined && String(video.lesson).trim() !== '') {
         parts.push(`L${video.lesson}`);
-      }
-      // Use course/subject for U part (matches download logic: videoData?.course)
-      const courseValue = video.course || video.subject;
-      if (courseValue !== null && courseValue !== undefined && String(courseValue).trim() !== '') {
-        parts.push(`U${courseValue}`);
       }
       if (video.module !== null && video.module !== undefined && String(video.module).trim() !== '') {
         parts.push(`M${video.module}`);
@@ -2601,9 +2635,13 @@ export async function generateFilteredVideosCSV(req, res) {
       
       // Always use the format with .png extension (matches QR code download filename exactly)
       // This is the actual QR code download filename format, NOT video_id
+      // Format: G{grade}_U{unit}_L{lesson}_M{module}.png (Order: G_U_L_M)
       const qrCodeName = parts.length > 0 
         ? parts.join('_') + '.png'
         : ''; // Empty if no parts (don't use video_id - user wants QR code download name format only)
+      
+      // Debug log to verify format
+      console.log(`[CSV Export] Video ${video.video_id}: QR code name = ${qrCodeName}, unit = ${video.unit}, grade = ${video.grade}, lesson = ${video.lesson}, module = ${video.module}`);
       
       // Playlist ID - use redirect_slug or video_id
       const playlistId = video.redirect_slug || video.video_id || '';

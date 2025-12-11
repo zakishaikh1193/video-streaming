@@ -3,6 +3,7 @@ import { Download, Copy, Check, Search, Filter, AlertCircle, Settings, CheckSqua
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../services/api';
 import QRCodeDiagnostic from '../components/QRCodeDiagnostic';
+import QRCodeViewer from '../components/QRCodeViewer';
 
 // Safe QR Code component wrapper
 function SafeQRCode({ value, size = 160 }) {
@@ -51,15 +52,17 @@ function QRCodeStorage() {
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [showDiagnostic, setShowDiagnostic] = useState(false);
   
-  // Filter options (Subject, Grade, Lesson)
+  // Filter options (Subject, Grade, Unit, Lesson)
   const [filterOptions, setFilterOptions] = useState({
     subjects: [],
     grades: [],
+    units: [],
     lessons: []
   });
   const [selectedFilters, setSelectedFilters] = useState({
     subject: 'all',
     grade: 'all',
+    unit: 'all',
     lesson: 'all'
   });
   
@@ -128,6 +131,7 @@ function QRCodeStorage() {
         setFilterOptions({
           subjects: response.data.subjects || [],
           grades: response.data.grades || [],
+          units: response.data.units || [],
           lessons: response.data.lessons || []
         });
       }
@@ -153,7 +157,7 @@ function QRCodeStorage() {
       );
     }
 
-    // Apply Subject, Grade, Lesson filters
+    // Apply Subject, Grade, Unit, Lesson filters
     if (selectedFilters.subject !== 'all') {
       filtered = filtered.filter(item => {
         const itemSubject = item.subject || item.course || '';
@@ -163,6 +167,11 @@ function QRCodeStorage() {
     if (selectedFilters.grade !== 'all') {
       filtered = filtered.filter(item => {
         return String(item.grade || '') === String(selectedFilters.grade);
+      });
+    }
+    if (selectedFilters.unit !== 'all') {
+      filtered = filtered.filter(item => {
+        return String(item.unit || '') === String(selectedFilters.unit);
       });
     }
     if (selectedFilters.lesson !== 'all') {
@@ -235,11 +244,12 @@ function QRCodeStorage() {
         throw new Error('Empty response from server');
       }
       
-      // Generate filename from Grade + Lesson + Unit in format G1_L1_U1_M1.png
+      // Generate filename from Grade + Unit + Lesson + Module in format G1_U1_L1_M1.png
+      // Order: Grade, Unit, Lesson, Module (G_U_L_M)
       const parts = [];
       if (videoData?.grade) parts.push(`G${videoData.grade}`);
+      if (videoData?.unit) parts.push(`U${videoData.unit}`); // Use unit field for U prefix
       if (videoData?.lesson) parts.push(`L${videoData.lesson}`);
-      if (videoData?.course) parts.push(`U${videoData.course}`); // Using course as unit
       if (videoData?.module) parts.push(`M${videoData.module}`);
       
       const filename = parts.length > 0 
@@ -318,11 +328,12 @@ function QRCodeStorage() {
         throw new Error('Empty response from server');
       }
       
-      // Generate filename from Grade + Lesson + Unit in format G1_L1_U1_M1.png
+      // Generate filename from Grade + Unit + Lesson + Module in format G1_U1_L1_M1.png
+      // Order: Grade, Unit, Lesson, Module (G_U_L_M)
       const parts = [];
       if (videoData?.grade) parts.push(`G${videoData.grade}`);
+      if (videoData?.unit) parts.push(`U${videoData.unit}`); // Use unit field for U prefix
       if (videoData?.lesson) parts.push(`L${videoData.lesson}`);
-      if (videoData?.course) parts.push(`U${videoData.course}`);
       if (videoData?.module) parts.push(`M${videoData.module}`);
       
       const filename = parts.length > 0 
@@ -356,6 +367,7 @@ function QRCodeStorage() {
       // Check if filters are applied
       const hasFilters = selectedFilters.subject !== 'all' || 
                         selectedFilters.grade !== 'all' || 
+                        selectedFilters.unit !== 'all' ||
                         selectedFilters.lesson !== 'all' ||
                         searchTerm.trim() !== '';
       
@@ -489,6 +501,7 @@ function QRCodeStorage() {
     
     const hasFilters = selectedFilters.subject !== 'all' || 
                       selectedFilters.grade !== 'all' || 
+                      selectedFilters.unit !== 'all' ||
                       selectedFilters.lesson !== 'all' ||
                       searchTerm.trim() !== '';
     
@@ -586,8 +599,8 @@ function QRCodeStorage() {
               />
             </div>
 
-            {/* Subject, Grade, Lesson Filters */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Subject, Grade, Unit, Lesson Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Subject Filter */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -623,6 +636,34 @@ function QRCodeStorage() {
                     .sort((a, b) => Number(a) - Number(b))
                     .map(grade => (
                       <option key={grade} value={grade}>Grade {grade}</option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Unit Filter */}
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Unit
+                </label>
+                <select
+                  value={selectedFilters.unit}
+                  onChange={(e) => setSelectedFilters(prev => ({ ...prev, unit: e.target.value }))}
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+                >
+                  <option value="all">All Units</option>
+                  {filterOptions.units
+                    .filter(u => u !== null && u !== undefined && String(u).trim() !== '')
+                    .sort((a, b) => {
+                      // Try to sort numerically first, then alphabetically
+                      const numA = Number(a);
+                      const numB = Number(b);
+                      if (!isNaN(numA) && !isNaN(numB)) {
+                        return numA - numB;
+                      }
+                      return String(a).localeCompare(String(b));
+                    })
+                    .map(unit => (
+                      <option key={unit} value={unit}>Unit {unit}</option>
                     ))}
                 </select>
               </div>
@@ -741,10 +782,8 @@ function QRCodeStorage() {
                 </div>
 
                 {/* QR Code */}
-                <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4 rounded-xl mb-4 border-2 border-blue-200 flex justify-center shadow-inner group-hover:border-blue-300 transition-colors">
-                  <div className="bg-white p-2 rounded-lg shadow-sm">
-                    <SafeQRCode value={item.shortUrl} size={160} />
-                  </div>
+                <div className="mb-4">
+                  <QRCodeViewer url={item.shortUrl} videoId={item.videoId} />
                 </div>
 
                 {/* Video Info */}

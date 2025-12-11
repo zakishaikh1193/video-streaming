@@ -2534,9 +2534,9 @@ export async function generateVideosCSV(req, res) {
 
 export async function generateFilteredVideosCSV(req, res) {
   try {
-    const { subject, grade, lesson } = req.query;
+    const { subject, grade, unit, lesson } = req.query;
     
-    console.log('[Generate Filtered CSV] Filters:', { subject, grade, lesson });
+    console.log('[Generate Filtered CSV] Filters:', { subject, grade, unit, lesson });
     
     // Build filters object
     const filters = { status: 'active' };
@@ -2545,6 +2545,9 @@ export async function generateFilteredVideosCSV(req, res) {
     }
     if (grade && grade !== 'all') {
       filters.grade = grade;
+    }
+    if (unit && unit !== 'all') {
+      filters.unit = unit;
     }
     if (lesson && lesson !== 'all') {
       filters.lesson = lesson;
@@ -2557,8 +2560,8 @@ export async function generateFilteredVideosCSV(req, res) {
       return res.status(400).json({ error: 'No videos found matching the selected filters' });
     }
 
-    // CSV headers as requested: Subject, Grade, Lesson, QR code name, Playlist ID, PlaylistTitle, Description, Short URL
-    const headers = ['Subject', 'Grade', 'Lesson', 'QR code name', 'Playlist ID', 'PlaylistTitle', 'Description', 'Short URL'];
+    // CSV headers as requested: Subject, Grade, Unit, Lesson, QR code name, Playlist ID, PlaylistTitle, Description, Short URL
+    const headers = ['Subject', 'Grade', 'Unit', 'Lesson', 'QR code name', 'Video ID', 'VideoTitle', 'Description', 'Short URL'];
     
     // Build base URL - use frontend URL (same as video page)
     const frontendUrl = config.urls?.frontend || config.urls?.base || 'http://localhost:5173';
@@ -2570,6 +2573,9 @@ export async function generateFilteredVideosCSV(req, res) {
       
       // Grade
       const gradeValue = video.grade || '';
+      
+      // Unit
+      const unitValue = video.unit || '';
       
       // Lesson
       const lessonValue = video.lesson || '';
@@ -2617,6 +2623,7 @@ export async function generateFilteredVideosCSV(req, res) {
       return [
         subjectValue,
         gradeValue,
+        unitValue,
         lessonValue,
         qrCodeName,
         playlistId,
@@ -2645,6 +2652,7 @@ export async function generateFilteredVideosCSV(req, res) {
     let filename = 'videos_export';
     if (subject && subject !== 'all') filename += `_subject_${subject}`;
     if (grade && grade !== 'all') filename += `_grade_${grade}`;
+    if (unit && unit !== 'all') filename += `_unit_${unit}`;
     if (lesson && lesson !== 'all') filename += `_lesson_${lesson}`;
     filename += `_${Date.now()}.csv`;
 

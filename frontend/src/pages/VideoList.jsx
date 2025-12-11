@@ -839,7 +839,7 @@ function VideoList() {
                       </div>
                     </Link>
                   )}
-
+            
                   {/* Status Badge */}
                   {video.status === 'active' && (
                     <div className="absolute top-6 right-6 z-30">
@@ -849,7 +849,7 @@ function VideoList() {
                     </div>
                   )}
                 </div>
-
+             
                 {/* Content Section */}
                 <div className="p-5 sm:p-6 bg-white">
                   {/* Screen Recording Title with Views in Top Right */}
@@ -942,15 +942,7 @@ function VideoList() {
 
                   {/* Action Buttons */}
                   <div className="flex items-center gap-2.5 pt-4 border-t-2 border-slate-200">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 text-blue-600"
-                        checked={selectedIds.has(video.id)}
-                        onChange={() => handleToggleSelect(video.id)}
-                      />
-                      <span className="text-xs text-slate-600">Select</span>
-                    </label>
+                    
                     <Link
                       to={`/video/${video.video_id}`}
                       className="flex-1 flex items-center justify-center gap-1.5 px-4 py-3 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-700 rounded-xl text-sm font-bold hover:from-blue-100 hover:to-blue-200 hover:text-blue-800 hover:shadow-lg transition-all duration-200 border-2 border-blue-300 transform hover:scale-105"

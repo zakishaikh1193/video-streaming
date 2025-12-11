@@ -51,3 +51,4 @@ CALL RenameCourseToSubject();
 DROP PROCEDURE IF EXISTS RenameCourseToSubject;
 
 
+

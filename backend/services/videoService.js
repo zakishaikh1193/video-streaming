@@ -30,34 +30,187 @@ export async function createVideo(videoData) {
     duration,
     size,
     version = 1,
-    status = 'active'
+    status = 'active',
+    createdBy = null // User ID who uploaded the video
   } = videoData;
+  
+  // Ensure ALL required columns exist before inserting - create them if they don't exist
+  // This ensures subject, grade, unit, lesson, module, status, description columns are always available
+  // NOTE: 'activity' and 'course' fields are REMOVED from the new schema
+  const requiredColumns = [
+    { name: 'subject', after: 'id', index: true, type: 'VARCHAR(255)' },
+    { name: 'grade', after: 'subject', index: false, type: 'VARCHAR(255)' },
+    { name: 'unit', after: 'grade', index: false, type: 'VARCHAR(255)' },
+    { name: 'lesson', after: 'unit', index: false, type: 'VARCHAR(255)' },
+    { name: 'module', after: 'lesson', index: false, type: 'VARCHAR(255)' },
+    { name: 'topic', after: 'module', index: false, type: 'VARCHAR(255)' },
+    { name: 'status', after: 'version', index: false, type: 'VARCHAR(50)' },
+    { name: 'description', after: 'topic', index: false, type: 'TEXT' },
+    { name: 'created_by', after: 'status', index: true, type: 'INT' }
+  ];
+
+  console.log('[createVideo] Ensuring all required columns exist...');
+  for (const col of requiredColumns) {
+    const exists = await columnExists(col.name);
+    if (!exists) {
+      try {
+        // Try to add column after the specified column
+        try {
+          await pool.execute(`ALTER TABLE videos ADD COLUMN ${col.name} ${col.type} NULL AFTER ${col.after}`);
+        } catch (afterError) {
+          // If AFTER clause fails, try adding at the end
+          console.warn(`[createVideo] Could not add ${col.name} after ${col.after}, trying at end...`);
+          await pool.execute(`ALTER TABLE videos ADD COLUMN ${col.name} ${col.type} NULL`);
+        }
+        
+        if (col.index) {
+          try {
+            await pool.execute(`ALTER TABLE videos ADD INDEX idx_${col.name} (${col.name})`);
+          } catch (indexError) {
+            // Index might already exist or fail, that's okay
+            console.warn(`[createVideo] Could not add index for ${col.name}:`, indexError.message);
+          }
+        }
+        console.log(`[createVideo] ✓ Added missing ${col.name} column to videos table`);
+      } catch (addColError) {
+        // Column might already exist or there's a syntax issue, check error code
+        if (addColError.code !== 'ER_DUP_FIELDNAME' && addColError.code !== 'ER_DUP_KEYNAME') {
+          console.warn(`[createVideo] Could not add ${col.name} column:`, addColError.message);
+        }
+      }
+    }
+  }
+
+  // Re-check which columns exist after ensuring they're created
+  const hasSubjectColumn = await columnExists('subject');
+  const hasCourseColumn = await columnExists('course');
+  const hasModuleColumn = await columnExists('module');
+  const hasUnitColumn = await columnExists('unit');
+  const hasGradeColumn = await columnExists('grade');
+  const hasLessonColumn = await columnExists('lesson');
+  const hasStatusColumn = await columnExists('status');
+  const hasDescriptionColumn = await columnExists('description');
+  const hasCreatedByColumn = await columnExists('created_by');
+  
+  console.log('[createVideo] Column existence check:', {
+    subject: hasSubjectColumn,
+    grade: hasGradeColumn,
+    unit: hasUnitColumn,
+    lesson: hasLessonColumn,
+    module: hasModuleColumn,
+    status: hasStatusColumn,
+    description: hasDescriptionColumn,
+    created_by: hasCreatedByColumn
+  });
+  
+  // Determine which field to use for subject/course - use subject value, map to course if needed
+  // Preserve actual values - don't convert empty strings to null if they're valid inputs
+  // Only convert to null if truly undefined/null
+  const subjectValue = (subject !== undefined && subject !== null && String(subject).trim() !== '') 
+    ? String(subject).trim() 
+    : null;
+  const moduleValue = (module !== undefined && module !== null && String(module).trim() !== '') 
+    ? String(module).trim() 
+    : null;
+  const unitValue = (unit !== undefined && unit !== null && String(unit).trim() !== '') 
+    ? String(unit).trim() 
+    : null;
+  const gradeValue = (grade !== undefined && grade !== null && String(grade).trim() !== '') 
+    ? String(grade).trim() 
+    : null;
+  const lessonValue = (lesson !== undefined && lesson !== null && String(lesson).trim() !== '') 
+    ? String(lesson).trim() 
+    : null;
+  const statusValue = (status !== undefined && status !== null && String(status).trim() !== '') 
+    ? String(status).trim() 
+    : 'active'; // Default to 'active' if not provided
+  const descriptionValue = (description !== undefined && description !== null) 
+    ? String(description).trim() 
+    : '';
+  
+  // Use subject column only (course column removed)
+  const dbSubjectColumn = hasSubjectColumn ? 'subject' : null;
+  
+  console.log('[createVideo] Processed values before insert:', {
+    subject: subjectValue,
+    grade: gradeValue,
+    unit: unitValue,
+    lesson: lessonValue,
+    module: moduleValue,
+    status: statusValue,
+    description: descriptionValue
+  });
   
   // Try with all new columns first, fallback to old schema if columns don't exist
   let query, params;
   
   try {
-    // Try with new schema (partner_id, subject, unit, module, activity, thumbnail_url)
-    // First try with unit column
+    // Try with new schema (partner_id, subject/course, unit, module, activity, thumbnail_url)
+    // Build query dynamically based on which columns exist
     try {
-      query = `
-        INSERT INTO videos (
-          video_id, partner_id, title, subject, grade, unit, lesson, module, activity, topic, description, language,
-          file_path, streaming_url, qr_url, thumbnail_url, redirect_slug, duration, size, version, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-      params = [
-        videoId, 
-        partnerId || null, 
-        title || 'Untitled Video', 
-        subject || null, 
-        grade || null, 
-        unit || null,
-        lesson || null, 
-        module || null, 
-        activity || null, 
-        topic || null, 
-        description || '', 
+      const columns = ['video_id', 'partner_id', 'title'];
+      const placeholders = ['?', '?', '?'];
+      const values = [videoId, partnerId || null, title || 'Untitled Video'];
+      
+      // Add subject/course - CRITICAL: Always include if column exists, even if value is null
+      if (dbSubjectColumn) {
+        columns.push(dbSubjectColumn);
+        placeholders.push('?');
+        values.push(subjectValue); // This can be null, which is fine - it explicitly sets NULL
+        console.log(`[createVideo] Adding ${dbSubjectColumn} to INSERT with value:`, subjectValue);
+      } else {
+        console.warn('[createVideo] ⚠️ Neither subject nor course column exists - cannot save subject value!');
+      }
+      
+      // Add grade if column exists
+      if (hasGradeColumn) {
+        columns.push('grade');
+        placeholders.push('?');
+        values.push(gradeValue);
+      }
+      
+      // Add unit if column exists
+      if (hasUnitColumn) {
+        columns.push('unit');
+        placeholders.push('?');
+        values.push(unitValue);
+      }
+      
+      // Add lesson if column exists
+      if (hasLessonColumn) {
+        columns.push('lesson');
+        placeholders.push('?');
+        values.push(lessonValue);
+      }
+      
+      // Add module if column exists - CRITICAL: Always include if column exists, even if value is null
+      if (hasModuleColumn) {
+        columns.push('module');
+        placeholders.push('?');
+        values.push(moduleValue); // This can be null, which is fine - it explicitly sets NULL
+        console.log('[createVideo] Adding module to INSERT with value:', moduleValue);
+      } else {
+        console.warn('[createVideo] ⚠️ Module column does not exist - cannot save module value!');
+      }
+      
+      // Add topic column (activity is removed from schema)
+      columns.push('topic');
+      placeholders.push('?');
+      values.push(
+        (topic !== undefined && topic !== null && String(topic).trim() !== '') ? String(topic).trim() : null
+      );
+      
+      // Add description if column exists
+      if (hasDescriptionColumn) {
+        columns.push('description');
+        placeholders.push('?');
+        values.push(descriptionValue);
+      }
+      
+      // Add language, file paths, etc.
+      columns.push('language', 'file_path', 'streaming_url', 'qr_url', 'thumbnail_url', 'redirect_slug', 'duration', 'size', 'version');
+      placeholders.push('?', '?', '?', '?', '?', '?', '?', '?', '?');
+      values.push(
         language || 'en',
         filePath || null, 
         streamingUrl || null, 
@@ -66,12 +219,80 @@ export async function createVideo(videoData) {
         redirectSlug || null, 
         duration || 0, 
         size || 0, 
-        version || 1, 
-        status || 'active'
-      ];
+        version || 1
+      );
+      
+      // Add status if column exists
+      if (hasStatusColumn) {
+        columns.push('status');
+        placeholders.push('?');
+        values.push(statusValue);
+      }
+      
+      // Add created_by if column exists
+      if (hasCreatedByColumn) {
+        columns.push('created_by');
+        placeholders.push('?');
+        values.push(createdBy);
+      }
+      
+      query = `INSERT INTO videos (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`;
+      params = values;
+      
+      console.log('[createVideo] Insert query columns:', columns);
+      console.log('[createVideo] Insert values being saved:', {
+        subject: subjectValue,
+        grade: gradeValue,
+        unit: unitValue,
+        lesson: lessonValue,
+        module: moduleValue,
+        status: statusValue,
+        description: descriptionValue,
+        allValues: values.map((val, idx) => ({ column: columns[idx], value: val }))
+      });
       
       const [result] = await pool.execute(query, params);
-      return result.insertId;
+      const insertId = result.insertId;
+      
+      // Verify the values were saved correctly by fetching the record
+      if (insertId) {
+        try {
+          // Use SELECT * to get all columns, then check what we actually saved
+          const [savedRows] = await pool.execute('SELECT * FROM videos WHERE id = ?', [insertId]);
+          if (savedRows.length > 0) {
+            const saved = savedRows[0];
+            console.log('[createVideo] ✓ Values verified in database after insert:', {
+              id: saved.id,
+              video_id: saved.video_id,
+              subject: saved.subject,
+              course: saved.course,
+              grade: saved.grade,
+              unit: saved.unit,
+              lesson: saved.lesson,
+              module: saved.module,
+              status: saved.status,
+              description: saved.description ? (saved.description.length > 50 ? saved.description.substring(0, 50) + '...' : saved.description) : saved.description,
+              allColumns: Object.keys(saved).filter(k => ['subject', 'course', 'grade', 'unit', 'lesson', 'module', 'status', 'description'].includes(k))
+            });
+            
+            // Warn if values we expected to save are NULL
+            if (subjectValue !== null && saved.subject === null && saved.course === null) {
+              console.warn('[createVideo] ⚠️ WARNING: Subject value was not saved! Expected:', subjectValue, 'Got:', saved.subject);
+            }
+            if (moduleValue !== null && saved.module === null) {
+              console.warn('[createVideo] ⚠️ WARNING: Module value was not saved! Expected:', moduleValue, 'Got:', saved.module);
+            }
+            if (gradeValue !== null && saved.grade === null) {
+              console.warn('[createVideo] ⚠️ WARNING: Grade value was not saved! Expected:', gradeValue, 'Got:', saved.grade);
+            }
+          }
+        } catch (verifyError) {
+          console.warn('[createVideo] Could not verify saved values:', verifyError.message);
+          console.warn('[createVideo] Verify error details:', verifyError);
+        }
+      }
+      
+      return insertId;
     } catch (unitError) {
       // If unit column doesn't exist, try to add it first, then retry
       if (unitError.code === 'ER_BAD_FIELD_ERROR') {
@@ -173,25 +394,115 @@ export async function getVideoByVideoId(videoId, includeInactive = false) {
  * Get video by database ID
  */
 export async function getVideoById(id) {
-  const query = 'SELECT * FROM videos WHERE id = ?';
+  // Check which columns exist before querying
+  const columnsToCheck = [
+    'id', 'video_id', 'partner_id', 'title', 'description', 'language',
+    'file_path', 'streaming_url', 'qr_url', 'thumbnail_url', 'redirect_slug',
+    'duration', 'size', 'version', 'status', 'created_at', 'updated_at',
+    'grade', 'lesson', 'activity', 'topic', 'subject', 'course', 'module', 'unit'
+  ];
+  
+  // Check existence of all columns
+  const columnChecks = {};
+  for (const col of columnsToCheck) {
+    columnChecks[col] = await columnExists(col);
+  }
+  
+  // Build SELECT query with only existing columns
+  const selectColumns = ['id', 'video_id', 'title']; // Required columns
+  
+  // Add optional columns only if they exist
+  const optionalColumns = [
+    'partner_id', 'description', 'language', 'file_path', 'streaming_url',
+    'qr_url', 'thumbnail_url', 'redirect_slug', 'duration', 'size', 'version',
+    'views', 'status', 'created_at', 'updated_at', 'grade', 'lesson', 'topic'
+  ];
+  
+  for (const col of optionalColumns) {
+    if (columnChecks[col]) {
+      selectColumns.push(col);
+    }
+  }
+  
+  // Add subject/course/module/unit if they exist
+  if (columnChecks['subject']) {
+    selectColumns.push('subject');
+  }
+  if (columnChecks['course']) {
+    selectColumns.push('course');
+  }
+  if (columnChecks['module']) {
+    selectColumns.push('module');
+  }
+  if (columnChecks['unit']) {
+    selectColumns.push('unit');
+  }
+  
+  // Store column existence for mapping
+  const hasSubjectColumn = columnChecks['subject'];
+  const hasCourseColumn = columnChecks['course'];
+  
+  const query = `SELECT ${selectColumns.join(', ')} FROM videos WHERE id = ?`;
   const [rows] = await pool.execute(query, [id]);
   const video = rows[0] || null;
   
-  // Log to verify subject information is being retrieved
-  if (video) {
-    console.log('[getVideoById] Retrieved video subject info:', {
-      id: video.id,
-      video_id: video.video_id,
-      subject: video.subject,
-      grade: video.grade,
-      unit: video.unit,
-      lesson: video.lesson,
-      module: video.module,
-      description: video.description
-    });
+  if (!video) {
+    return null;
   }
   
-  return video;
+  // Determine subject value - check both subject and course columns for backward compatibility
+  const subjectValue = (video.subject !== undefined && video.subject !== null && video.subject !== '') 
+    ? video.subject 
+    : ((video.course !== undefined && video.course !== null && video.course !== '') 
+        ? video.course 
+        : null);
+  
+  // Log to verify subject information is being retrieved
+  console.log('[getVideoById] Retrieved video subject info:', {
+    id: video.id,
+    video_id: video.video_id,
+    subject: video.subject,
+    course: video.course,
+    subjectValue: subjectValue,
+    grade: video.grade,
+    unit: video.unit,
+    lesson: video.lesson,
+    module: video.module,
+    description: video.description
+  });
+  
+  // Helper to preserve values including "0" and empty strings that might be valid
+  const preserveValue = (val) => {
+    if (val === undefined || val === null) return null;
+    const str = String(val).trim();
+    return str !== '' ? str : null;
+  };
+  
+  const result = {
+    ...video,
+    subject: subjectValue,
+    course: subjectValue, // Backward compatibility
+    grade: preserveValue(video.grade),
+    unit: preserveValue(video.unit),
+    lesson: preserveValue(video.lesson),
+    module: preserveValue(video.module),
+    description: video.description !== undefined ? video.description : null
+  };
+  
+  console.log('[getVideoById] Returning video with mapped values:', {
+    id: result.id,
+    video_id: result.video_id,
+    subject: result.subject,
+    module: result.module,
+    unit: result.unit,
+    grade: result.grade,
+    lesson: result.lesson,
+    rawSubject: video.subject,
+    rawModule: video.module,
+    rawCourse: video.course
+  });
+  
+  return result;
 }
 
 /**
@@ -271,35 +582,130 @@ export async function getVideoByRedirectSlug(redirectSlug, includeInactive = fal
  * Get all videos with filters
  */
 export async function getAllVideos(filters = {}) {
-  let query = 'SELECT * FROM videos WHERE 1=1';
+  // Check which columns exist before querying - check all possible columns
+  // NOTE: 'course' and 'activity' are removed from schema
+  const columnsToCheck = [
+    'id', 'video_id', 'partner_id', 'title', 'description', 'language',
+    'file_path', 'streaming_url', 'qr_url', 'thumbnail_url', 'redirect_slug',
+    'duration', 'size', 'version', 'views', 'status', 'created_at', 'updated_at',
+    'grade', 'lesson', 'topic', 'subject', 'module', 'unit'
+  ];
+  
+  // Check existence of all columns
+  const columnChecks = {};
+  for (const col of columnsToCheck) {
+    columnChecks[col] = await columnExists(col);
+  }
+  
+  // Build SELECT query with only existing columns (start with required ones)
+  const selectColumns = ['id', 'video_id', 'title']; // Required columns that should always exist
+  
+  // Add optional columns only if they exist
+  const optionalColumns = [
+    'partner_id', 'description', 'language', 'file_path', 'streaming_url',
+    'qr_url', 'thumbnail_url', 'redirect_slug', 'duration', 'size', 'version',
+    'views', 'status', 'created_at', 'updated_at', 'grade', 'lesson', 'topic'
+  ];
+  
+  for (const col of optionalColumns) {
+    if (columnChecks[col]) {
+      selectColumns.push(col);
+    }
+  }
+  
+  // CRITICAL: Add subject/course/module/unit if they exist - these are essential for display
+  // Ensure these are ALWAYS included when they exist
+  if (columnChecks['subject']) {
+    selectColumns.push('subject');
+    console.log('[getAllVideos] ✓ Adding subject column to SELECT query');
+  } else {
+    console.warn('[getAllVideos] ⚠️ Subject column does not exist!');
+  }
+  // Course column removed from schema - no longer selecting it
+  if (columnChecks['module']) {
+    selectColumns.push('module');
+    console.log('[getAllVideos] ✓ Adding module column to SELECT query');
+  } else {
+    console.warn('[getAllVideos] ⚠️ Module column does not exist!');
+  }
+  if (columnChecks['unit']) {
+    selectColumns.push('unit');
+  }
+  
+  // Store column existence for use in filters
+  const hasSubjectColumn = columnChecks['subject'];
+  const hasCourseColumn = columnChecks['course'];
+  const hasModuleColumn = columnChecks['module'];
+  const hasUnitColumn = columnChecks['unit'];
+  
+  // Log the final SELECT columns to verify subject and module are included
+  console.log('[getAllVideos] Final SELECT columns:', selectColumns);
+  console.log('[getAllVideos] Column existence check:', {
+    subject: hasSubjectColumn,
+    course: hasCourseColumn,
+    module: hasModuleColumn,
+    unit: hasUnitColumn
+  });
+  
+  let query = `SELECT ${selectColumns.join(', ')} FROM videos WHERE 1=1`;
   const params = [];
   
   // Search filter - searches in title, description, video_id, subject, grade, lesson, module, activity, topic
   if (filters.search) {
-    query += ` AND (
-      title LIKE ? OR 
-      description LIKE ? OR 
-      video_id LIKE ? OR 
-      subject LIKE ? OR 
-      grade LIKE ? OR 
-      lesson LIKE ? OR 
-      module LIKE ? OR 
-      activity LIKE ? OR 
-      topic LIKE ?
-    )`;
+    const searchConditions = ['title LIKE ?', 'description LIKE ?', 'video_id LIKE ?'];
     const searchTerm = `%${filters.search}%`;
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+    const searchParams = [searchTerm, searchTerm, searchTerm];
+    
+    // Add column-based searches only if columns exist
+    if (hasSubjectColumn) {
+      searchConditions.push('subject LIKE ?');
+      searchParams.push(searchTerm);
+    }
+    if (hasModuleColumn) {
+      searchConditions.push('module LIKE ?');
+      searchParams.push(searchTerm);
+    }
+    if (hasUnitColumn) {
+      searchConditions.push('unit LIKE ?');
+      searchParams.push(searchTerm);
+    }
+    searchConditions.push('grade LIKE ?', 'lesson LIKE ?', 'topic LIKE ?');
+    searchParams.push(searchTerm, searchTerm, searchTerm);
+    
+    query += ` AND (${searchConditions.join(' OR ')})`;
+    params.push(...searchParams);
   }
   
-  if (filters.subject) {
-    query += ' AND subject = ?';
-    params.push(filters.subject);
+  // Filter by subject (check both subject and course columns)
+  // Use case-insensitive comparison for better matching
+  if (filters.subject && filters.subject.trim()) {
+    const subjectValue = filters.subject.trim();
+    if (hasSubjectColumn) {
+      // Use LOWER() for case-insensitive comparison
+      query += ' AND LOWER(TRIM(subject)) = LOWER(TRIM(?))';
+      params.push(subjectValue);
+      console.log('[getAllVideos] ✓ Filtering by subject:', subjectValue, '(hasSubjectColumn:', hasSubjectColumn, ')');
+    } else if (hasCourseColumn) {
+      query += ' AND LOWER(TRIM(course)) = LOWER(TRIM(?))';
+      params.push(subjectValue);
+      console.log('[getAllVideos] ✓ Filtering by course (legacy):', subjectValue);
+    } else {
+      console.warn('[getAllVideos] ⚠️ Subject filter provided but neither subject nor course column exists!');
+    }
   }
   
   // Support legacy 'course' filter for backward compatibility
-  if (filters.course) {
-    query += ' AND subject = ?';
-    params.push(filters.course);
+  if (filters.course && filters.course.trim()) {
+    const courseValue = filters.course.trim();
+    if (hasSubjectColumn) {
+      query += ' AND LOWER(TRIM(subject)) = LOWER(TRIM(?))';
+      params.push(courseValue);
+      console.log('[getAllVideos] ✓ Filtering by course (mapped to subject):', courseValue);
+    } else if (hasCourseColumn) {
+      query += ' AND LOWER(TRIM(course)) = LOWER(TRIM(?))';
+      params.push(courseValue);
+      console.log('[getAllVideos] ✓ Filtering by course (legacy):', courseValue);
+    }
   }
   
   if (filters.grade) {
@@ -312,13 +718,14 @@ export async function getAllVideos(filters = {}) {
     params.push(filters.lesson);
   }
   
-  if (filters.module) {
+  // Filter by module only if column exists
+  if (filters.module && hasModuleColumn) {
     query += ' AND module = ?';
     params.push(filters.module);
   }
   
   // Filter by module number (extract numeric part from module field)
-  if (filters.moduleNumber) {
+  if (filters.moduleNumber && hasModuleColumn) {
     // Extract number from module field and match
     // This handles cases like "Module 1", "1", "M1", "Module1", etc.
     const moduleNum = parseInt(filters.moduleNumber);
@@ -338,31 +745,62 @@ export async function getAllVideos(filters = {}) {
     params.push(filters.activity);
   }
   
-  if (filters.unit) {
+  // Filter by unit only if column exists
+  if (filters.unit && hasUnitColumn) {
     query += ' AND unit = ?';
     params.push(filters.unit);
   }
   
-  if (filters.status) {
+  if (filters.status && filters.status.trim()) {
     query += ' AND status = ?';
-    params.push(filters.status);
+    params.push(filters.status.trim());
   }
   
   // Don't filter by file_path - include all videos regardless of storage location
   // This ensures videos in upload/, my-storage/, and other locations are all shown
   query += ' ORDER BY created_at DESC';
   
-  console.log('[getAllVideos] Query:', query);
-  console.log('[getAllVideos] Params:', params);
+  // Log the final query for debugging
+  console.log('[getAllVideos] Final query:', query);
+  console.log('[getAllVideos] Query params:', params);
   
   const [rows] = await pool.execute(query, params);
   
   console.log(`[getAllVideos] Found ${rows.length} videos`);
+  console.log(`[getAllVideos] Query executed: ${query}`);
+  console.log(`[getAllVideos] Selected columns count: ${selectColumns.length}`);
   
-  // Log subject information to verify it's being returned - show all fields including nulls
+  // CRITICAL: Verify what we actually got from database
+  // Also do a direct SELECT * query for the first video to compare
   if (rows.length > 0) {
     const sampleVideo = rows[0];
-    console.log('[getAllVideos] Sample video subject info from database (all fields):', {
+    
+    // Do a direct SELECT * query to see ALL columns for comparison
+    try {
+      const [directRows] = await pool.execute('SELECT * FROM videos WHERE id = ?', [sampleVideo.id]);
+      if (directRows.length > 0) {
+        const directVideo = directRows[0];
+        console.log('[getAllVideos] ===== DIRECT DATABASE CHECK =====');
+        console.log('[getAllVideos] Direct SELECT * result for first video:', {
+          id: directVideo.id,
+          video_id: directVideo.video_id,
+          subject: directVideo.subject,
+          module: directVideo.module,
+          grade: directVideo.grade,
+          unit: directVideo.unit,
+          lesson: directVideo.lesson,
+          hasSubjectColumn: 'subject' in directVideo,
+          hasModuleColumn: 'module' in directVideo,
+          allColumns: Object.keys(directVideo).filter(k => ['subject', 'module', 'grade', 'unit', 'lesson'].includes(k))
+        });
+        console.log('[getAllVideos] =================================');
+      }
+    } catch (directError) {
+      console.warn('[getAllVideos] Could not perform direct database check:', directError.message);
+    }
+    
+    // Log subject information to verify it's being returned - show all fields including nulls
+    console.log('[getAllVideos] Sample video from dynamic SELECT query:', {
       id: sampleVideo.id,
       video_id: sampleVideo.video_id,
       title: sampleVideo.title,
@@ -378,12 +816,21 @@ export async function getAllVideos(filters = {}) {
       gradeType: typeof sampleVideo.grade,
       unitType: typeof sampleVideo.unit,
       lessonType: typeof sampleVideo.lesson,
-      moduleType: typeof sampleVideo.module
+      moduleType: typeof sampleVideo.module,
+      // Show which columns are actually present in result
+      hasSubject: 'subject' in sampleVideo,
+      hasModule: 'module' in sampleVideo,
+      hasCourse: 'course' in sampleVideo
     });
     
     // Log all column names to verify all fields are being selected
-    if (rows.length > 0) {
-      console.log('[getAllVideos] Available columns in result:', Object.keys(rows[0]));
+    console.log('[getAllVideos] Available columns in result:', Object.keys(sampleVideo));
+    console.log('[getAllVideos] Expected columns in SELECT:', selectColumns);
+    
+    // Compare expected vs actual
+    const missingColumns = selectColumns.filter(col => !(col in sampleVideo));
+    if (missingColumns.length > 0) {
+      console.warn('[getAllVideos] ⚠️ WARNING: Columns in SELECT but not in result:', missingColumns);
     }
   }
   
@@ -396,18 +843,65 @@ export async function getAllVideos(filters = {}) {
     }
   }
   
-  // Ensure all fields are returned, even if null - SELECT * should already do this
-  // But we'll explicitly map to ensure consistency
-  return rows.map(video => ({
-    ...video,
-    // Explicitly include all subject information fields, preserving null values
-    subject: video.subject !== undefined ? video.subject : null,
-    grade: video.grade !== undefined ? video.grade : null,
-    unit: video.unit !== undefined ? video.unit : null,
-    lesson: video.lesson !== undefined ? video.lesson : null,
-    module: video.module !== undefined ? video.module : null,
-    description: video.description !== undefined ? video.description : null
-  }));
+  // Ensure all fields are returned with proper mapping and backward compatibility
+  // CRITICAL: Map each video and explicitly ensure subject and module are included
+  return rows.map((video, index) => {
+    // Determine subject value (course column removed, only use subject)
+    // Preserve actual values including "0" and empty strings that might be valid
+    const subjectValue = (video.subject !== undefined && video.subject !== null && String(video.subject).trim() !== '') 
+      ? String(video.subject).trim() 
+      : null;
+    
+    // Helper to preserve values including "0"
+    const preserveValue = (val) => {
+      if (val === undefined || val === null) return null;
+      const str = String(val).trim();
+      return str !== '' ? str : null;
+    };
+    
+    // CRITICAL: Explicitly map module value - ensure it's always included in result
+    const moduleValue = preserveValue(video.module);
+    
+    const result = {
+      ...video,
+      // Explicitly include all subject information fields, preserving actual values
+      subject: subjectValue,
+      course: subjectValue, // Backward compatibility - map to subject (course column removed)
+      grade: preserveValue(video.grade),
+      unit: preserveValue(video.unit),
+      lesson: preserveValue(video.lesson),
+      module: moduleValue, // CRITICAL: Explicitly set module value
+      description: video.description !== undefined ? video.description : null
+    };
+    
+    // Log first 3 videos for debugging to see raw vs mapped values
+    if (index < 3) {
+      console.log(`[getAllVideos] Video ${index + 1} - Before mapping (raw from DB):`, {
+        id: video.id,
+        video_id: video.video_id,
+        subject: video.subject,
+        course: video.course,
+        module: video.module,
+        grade: video.grade,
+        unit: video.unit,
+        lesson: video.lesson,
+        hasSubject: 'subject' in video,
+        hasModule: 'module' in video,
+        allKeys: Object.keys(video)
+      });
+      console.log(`[getAllVideos] Video ${index + 1} - After mapping (returned to controller):`, {
+        id: result.id,
+        video_id: result.video_id,
+        subject: result.subject,
+        module: result.module,
+        unit: result.unit,
+        grade: result.grade,
+        lesson: result.lesson
+      });
+    }
+    
+    return result;
+  });
 }
 
 /**
@@ -459,48 +953,373 @@ export async function getFilterValues() {
 }
 
 /**
+ * Increment view count for a video
+ */
+export async function incrementVideoViews(videoId) {
+  try {
+    // Check if views column exists, if not add it
+    const viewsColumnExists = await columnExists('views');
+    if (!viewsColumnExists) {
+      try {
+        await pool.execute('ALTER TABLE videos ADD COLUMN views INT DEFAULT 0 COMMENT "Number of times video has been viewed"');
+        console.log('[incrementVideoViews] Added views column to videos table');
+      } catch (err) {
+        if (err.code !== 'ER_DUP_FIELDNAME') {
+          console.warn('[incrementVideoViews] Could not add views column:', err.message);
+        }
+      }
+    }
+    
+    // Increment views count
+    // Try by database ID first, then by video_id
+    let result;
+    try {
+      // Try incrementing by database ID (if videoId is numeric)
+      if (!isNaN(videoId)) {
+        const [updateResult] = await pool.execute(
+          'UPDATE videos SET views = COALESCE(views, 0) + 1, updated_at = NOW() WHERE id = ?',
+          [parseInt(videoId)]
+        );
+        if (updateResult.affectedRows > 0) {
+          result = updateResult;
+        }
+      }
+      
+      // If not updated by ID, try by video_id
+      if (!result || result.affectedRows === 0) {
+        const [updateResult] = await pool.execute(
+          'UPDATE videos SET views = COALESCE(views, 0) + 1, updated_at = NOW() WHERE video_id = ?',
+          [videoId]
+        );
+        result = updateResult;
+      }
+      
+      // If still not updated, try by redirect_slug
+      if (!result || result.affectedRows === 0) {
+        const [updateResult] = await pool.execute(
+          'UPDATE videos SET views = COALESCE(views, 0) + 1, updated_at = NOW() WHERE redirect_slug = ?',
+          [videoId]
+        );
+        result = updateResult;
+      }
+      
+      if (result && result.affectedRows > 0) {
+        // Fetch updated view count
+        const [rows] = await pool.execute(
+          'SELECT views FROM videos WHERE id = ? OR video_id = ? OR redirect_slug = ? LIMIT 1',
+          [videoId, videoId, videoId]
+        );
+        const newViews = rows[0]?.views || 0;
+        console.log(`[incrementVideoViews] ✓ Incremented views for video: ${videoId}, new count: ${newViews}`);
+        return newViews;
+      } else {
+        console.warn(`[incrementVideoViews] ⚠️ No video found to increment views for: ${videoId}`);
+        return null;
+      }
+    } catch (updateError) {
+      console.error('[incrementVideoViews] Error incrementing views:', updateError.message);
+      throw updateError;
+    }
+  } catch (error) {
+    console.error('[incrementVideoViews] Error:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Check if a column exists in the videos table
+ */
+async function columnExists(columnName) {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) as count 
+       FROM information_schema.columns 
+       WHERE table_schema = DATABASE() 
+       AND table_name = 'videos' 
+       AND LOWER(column_name) = LOWER(?)`,
+      [columnName]
+    );
+    // Handle both lowercase and uppercase count fields
+    const count = rows[0]?.count || rows[0]?.COUNT || 0;
+    return count > 0;
+  } catch (error) {
+    console.error(`Error checking column ${columnName}:`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Ensure core video metadata columns exist (subject/course/grade/unit/lesson/module/activity/topic)
+ */
+async function ensureVideoColumns() {
+  const columns = [
+    { name: 'subject', definition: "ALTER TABLE videos ADD COLUMN subject VARCHAR(255) NULL AFTER id" },
+    { name: 'course', definition: "ALTER TABLE videos ADD COLUMN course VARCHAR(255) NULL AFTER subject" },
+    { name: 'grade', definition: "ALTER TABLE videos ADD COLUMN grade VARCHAR(255) NULL" },
+    { name: 'unit', definition: "ALTER TABLE videos ADD COLUMN unit VARCHAR(255) NULL" },
+    { name: 'lesson', definition: "ALTER TABLE videos ADD COLUMN lesson VARCHAR(255) NULL" },
+    { name: 'module', definition: "ALTER TABLE videos ADD COLUMN module VARCHAR(255) NULL" },
+    { name: 'activity', definition: "ALTER TABLE videos ADD COLUMN activity VARCHAR(255) NULL" },
+    { name: 'topic', definition: "ALTER TABLE videos ADD COLUMN topic VARCHAR(255) NULL" }
+  ];
+
+  for (const col of columns) {
+    const exists = await columnExists(col.name);
+    if (!exists) {
+      try {
+        await pool.execute(col.definition);
+        console.log(`[ensureVideoColumns] Added missing column: ${col.name}`);
+      } catch (err) {
+        if (err.code !== 'ER_DUP_FIELDNAME') {
+          console.warn(`[ensureVideoColumns] Could not add column ${col.name}:`, err.message);
+        }
+      }
+    }
+  }
+}
+
+/**
  * Update video metadata
  */
 export async function updateVideo(id, updates) {
+  // Ensure columns exist before updating
+  await ensureVideoColumns();
+  
   const allowedFields = [
     'title', 'description', 'language', 'status',
     'subject', 'course', 'grade', 'unit', 'lesson', 'module',
     'streaming_url', 'file_path', 'thumbnail_url'
   ];
   
+  // Check which columns exist
+  const hasSubjectColumn = await columnExists('subject');
+  const hasCourseColumn = await columnExists('course');
+  const hasModuleColumn = await columnExists('module');
+  const hasUnitColumn = await columnExists('unit');
+  
+  // Helper function to safely convert values to strings, preserving non-empty values
+  const safeStringValue = (val) => {
+    if (val === undefined || val === null) return null;
+    const str = String(val).trim();
+    return str !== '' ? str : null;
+  };
+  
   const fields = [];
   const values = [];
   
+  console.log('[updateVideo] Updating video ID:', id);
+  console.log('[updateVideo] Updates received:', updates);
+  console.log('[updateVideo] Column existence:', {
+    subject: hasSubjectColumn,
+    module: hasModuleColumn,
+    unit: hasUnitColumn
+  });
+  
   for (const [key, value] of Object.entries(updates)) {
     if (allowedFields.includes(key) && value !== undefined) {
-      // Handle null values for optional fields
-      if (value === '' || value === null) {
-        fields.push(`${key} = NULL`);
-      } else {
-        fields.push(`${key} = ?`);
-        values.push(value);
+      // Map column name (course field removed, only subject exists)
+      let dbColumn = key;
+      if (key === 'subject' && !hasSubjectColumn) {
+        // Skip if subject column doesn't exist (shouldn't happen after ensureVideoColumns)
+        console.warn('[updateVideo] Subject column does not exist, skipping subject update');
+        continue;
+      } else if (key === 'course') {
+        // Map course to subject for backward compatibility (but course column is removed)
+        dbColumn = 'subject';
+        console.log('[updateVideo] Mapping course to subject (course column removed)');
       }
+      
+      // Skip updating columns that don't exist (except subject/course which are handled above)
+      if ((key === 'module' && !hasModuleColumn) || (key === 'unit' && !hasUnitColumn)) {
+        console.warn(`[updateVideo] Column ${key} does not exist, skipping update`);
+        continue;
+      }
+      
+      // Convert value to string and preserve non-empty values
+      // Special handling: preserve actual values including "0", "1", etc.
+      // CRITICAL: Empty strings should be explicitly set to NULL in database
+      let processedValue;
+      if (value === null || value === undefined || value === '') {
+        processedValue = null;
+      } else {
+        const str = String(value).trim();
+        // Preserve the value if it's not empty, including "0" and "1"
+        processedValue = str !== '' ? str : null;
+      }
+      
+      // CRITICAL: Always use parameterized queries, even for NULL values
+      // This ensures the value is explicitly set in the database
+      fields.push(`${dbColumn} = ?`);
+      values.push(processedValue);
+      
+      console.log(`[updateVideo] Adding field: ${dbColumn} = ${processedValue === null ? 'NULL' : `"${processedValue}"`} (original: ${JSON.stringify(value)}, type: ${typeof value})`);
     }
   }
   
   if (fields.length === 0) {
+    console.warn('[updateVideo] No fields to update');
     return null;
   }
   
   values.push(id);
   const query = `UPDATE videos SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`;
   
-  const [result] = await pool.execute(query, values);
+  console.log('[updateVideo] Executing query:', query);
+  console.log('[updateVideo] With values:', values);
+  
+  try {
+    const [result] = await pool.execute(query, values);
+    
+    // Verify the update was successful
+    if (result.affectedRows > 0) {
+      // Immediately fetch the updated record to verify values were saved
+      try {
+        // Build SELECT query dynamically based on which columns exist
+        const verifyColumns = [];
+        if (hasSubjectColumn) verifyColumns.push('subject');
+        if (hasModuleColumn) verifyColumns.push('module');
+        if (hasUnitColumn) verifyColumns.push('unit');
+        verifyColumns.push('grade', 'lesson'); // These should always exist
+        
+        const verifyQuery = `SELECT ${verifyColumns.join(', ')} FROM videos WHERE id = ?`;
+        const [verifyRows] = await pool.execute(verifyQuery, [id]);
+        if (verifyRows.length > 0) {
+          const verified = verifyRows[0];
+          console.log('[updateVideo] ✓ Values verified after update:', {
+            id: id,
+            subject: verified.subject,
+            module: verified.module,
+            grade: verified.grade,
+            unit: verified.unit,
+            lesson: verified.lesson
+          });
+          
+          // Warn if expected values are still NULL
+          if (updates.subject !== undefined && updates.subject !== null) {
+            if (verified.subject === null) {
+              console.warn('[updateVideo] ⚠️ WARNING: Subject value was not saved! Expected:', updates.subject, 'Got:', verified.subject);
+            }
+          }
+          if (updates.module !== undefined && updates.module !== null && verified.module === null) {
+            console.warn('[updateVideo] ⚠️ WARNING: Module value was not saved! Expected:', updates.module, 'Got:', verified.module);
+          }
+        }
+      } catch (verifyError) {
+        console.warn('[updateVideo] Could not verify saved values:', verifyError.message);
+        console.warn('[updateVideo] Verify error details:', verifyError);
+      }
+    }
+    
+    return result.affectedRows > 0;
+  } catch (error) {
+    console.error('[updateVideo] Database update error:', error.message);
+    console.error('[updateVideo] Query:', query);
+    console.error('[updateVideo] Values:', values);
+    throw error;
+  }
+}
+
+/**
+ * Delete video (hard delete: remove video, versions, and redirect)
+ */
+export async function deleteVideo(id) {
+  // Fetch video first to verify it exists
+  const video = await getVideoById(id);
+  if (!video) {
+    return false;
+  }
+
+  // Soft delete: Set status to 'deleted' instead of hard deleting
+  // This allows videos to be restored from trash
+  // Keep redirects and video_versions for restoration
+  const query = 'UPDATE videos SET status = "deleted", updated_at = NOW() WHERE id = ?';
+  const [result] = await pool.execute(query, [id]);
+  
+  console.log(`[deleteVideo] Soft deleted video ID ${id} (video_id: ${video.video_id})`);
   return result.affectedRows > 0;
 }
 
 /**
- * Delete video (soft delete)
+ * Get all deleted videos
  */
-export async function deleteVideo(id) {
-  const query = 'UPDATE videos SET status = "deleted", updated_at = NOW() WHERE id = ?';
+export async function getDeletedVideos() {
+  const query = 'SELECT * FROM videos WHERE status = "deleted" ORDER BY updated_at DESC';
+  const [rows] = await pool.execute(query);
+  return rows;
+}
+
+/**
+ * Restore deleted video (set status back to active)
+ */
+export async function restoreVideo(id) {
+  const query = 'UPDATE videos SET status = "active", updated_at = NOW() WHERE id = ?';
   const [result] = await pool.execute(query, [id]);
   return result.affectedRows > 0;
+}
+
+/**
+ * Permanently delete video (hard delete: remove from database)
+ * This removes the video record, redirects, and related data permanently
+ */
+export async function permanentDeleteVideo(id) {
+  // Fetch video first to verify it exists and is deleted
+  const video = await getVideoById(id);
+  if (!video) {
+    return false;
+  }
+
+  // Hard delete: Remove video record permanently
+  // Also delete related redirects
+  try {
+    // Delete redirects associated with this video
+    if (video.redirect_slug) {
+      await pool.execute('DELETE FROM redirects WHERE slug = ?', [video.redirect_slug]);
+    }
+    if (video.video_id) {
+      await pool.execute('DELETE FROM redirects WHERE slug = ?', [video.video_id]);
+    }
+
+    // Delete video record permanently
+    const query = 'DELETE FROM videos WHERE id = ?';
+    const [result] = await pool.execute(query, [id]);
+    
+    console.log(`[permanentDeleteVideo] Permanently deleted video ID ${id} (video_id: ${video.video_id})`);
+    return result.affectedRows > 0;
+  } catch (error) {
+    console.error(`[permanentDeleteVideo] Error permanently deleting video ID ${id}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Permanently delete multiple videos at once
+ */
+export async function permanentDeleteVideos(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return { success: false, deleted: 0, errors: [] };
+  }
+
+  const results = {
+    success: true,
+    deleted: 0,
+    errors: []
+  };
+
+  for (const id of ids) {
+    try {
+      const deleted = await permanentDeleteVideo(id);
+      if (deleted) {
+        results.deleted++;
+      } else {
+        results.errors.push({ id, error: 'Video not found or already deleted' });
+      }
+    } catch (error) {
+      results.success = false;
+      results.errors.push({ id, error: error.message });
+    }
+  }
+
+  return results;
 }
 
 /**

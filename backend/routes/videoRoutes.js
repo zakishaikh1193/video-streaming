@@ -37,6 +37,9 @@ router.use((req, res, next) => {
 router.get('/', videoController.getAllVideos);
 router.get('/filters', videoController.getFilterValues);
 
+// Increment video views (public endpoint - no auth required)
+router.post('/:videoId/increment-views', videoController.incrementVideoViews);
+
 // Public API to get redirect info by slug (for frontend short URL handling)
 router.get('/redirect-info/:slug', async (req, res) => {
   try {
@@ -100,6 +103,29 @@ router.get('/qr-codes', (req, res, next) => {
 }, authenticateToken, videoController.getAllQRCodes);
 router.get('/thumbnails', authenticateToken, thumbnailController.getThumbnails);
 router.get('/export-csv', authenticateToken, videoController.generateVideosCSV);
+router.get('/export-filtered-csv', (req, res, next) => {
+  console.log('[Route] /export-filtered-csv route hit');
+  console.log('[Route] Query params:', req.query);
+  console.log('[Route] Auth header:', req.headers.authorization ? 'Present' : 'Missing');
+  next();
+}, authenticateToken, videoController.generateFilteredVideosCSV);
+
+// Deleted videos route - MUST be before any /:id or /:videoId routes
+router.get('/deleted', (req, res, next) => {
+  console.log('[Route] ===== /deleted route hit =====');
+  console.log('[Route] Method:', req.method);
+  console.log('[Route] Path:', req.path);
+  console.log('[Route] URL:', req.url);
+  console.log('[Route] Original URL:', req.originalUrl);
+  console.log('[Route] Auth header:', req.headers.authorization ? 'Present' : 'Missing');
+  if (req.headers.authorization) {
+    console.log('[Route] Auth token present');
+  }
+  next();
+}, authenticateToken, videoController.getDeletedVideos);
+
+// Permanently delete multiple videos (bulk delete) - MUST be before dynamic routes
+router.post('/permanent-delete', authenticateToken, videoController.permanentDeleteVideos);
 
 // QR code download route - MUST be before other /:videoId/* routes
 router.get('/:videoId/qr-download', (req, res, next) => {
@@ -182,6 +208,27 @@ router.get('/test-qr-codes', (req, res) => {
   });
 });
 
+// Test endpoint for deleted videos route
+router.get('/test-deleted', (req, res) => {
+  res.json({ 
+    message: 'Deleted videos route is accessible', 
+    timestamp: new Date().toISOString(),
+    route: '/api/videos/deleted',
+    note: 'This is a test endpoint. The actual route is /deleted'
+  });
+});
+
+// Test endpoint for filtered CSV export route
+router.get('/test-export-filtered-csv', (req, res) => {
+  res.json({ 
+    message: 'Filtered CSV export route is accessible', 
+    timestamp: new Date().toISOString(),
+    route: '/api/videos/export-filtered-csv',
+    query: req.query,
+    note: 'This is a test endpoint. The actual route requires authentication.'
+  });
+});
+
 // Simple streaming test endpoint
 router.get('/test/:videoId/stream', async (req, res) => {
   console.log('[Test Route] Streaming test endpoint hit:', req.params.videoId);
@@ -201,8 +248,11 @@ router.get('/debug/routes', (req, res) => {
     routes: [
       'GET /api/videos/',
       'GET /api/videos/filters',
+      'GET /api/videos/deleted (protected)',
       'GET /api/videos/misc-videos (protected)',
       'GET /api/videos/qr-codes (protected)',
+      'GET /api/videos/export-csv (protected)',
+      'GET /api/videos/export-filtered-csv (protected)',
       'GET /api/videos/test-stream',
       'GET /api/videos/:videoId/stream',
       'GET /api/videos/:videoId',
@@ -210,6 +260,7 @@ router.get('/debug/routes', (req, res) => {
       'POST /api/videos/bulk-upload (protected)',
       'PUT /api/videos/:id (protected)',
       'DELETE /api/videos/:id (protected)',
+      'POST /api/videos/:id/restore (protected)',
       'GET /api/videos/:videoId/versions (protected)',
       'GET /api/videos/:videoId/qr-download (protected)'
     ]
@@ -315,8 +366,18 @@ router.get('/:videoId/stream', async (req, res, next) => {
   }
 });
 
+router.get('/by-id/:id', authenticateToken, videoController.getVideoById);
+router.get('/diagnostic/:id', authenticateToken, videoController.getVideoMetadataDiagnostic);
+router.post('/diagnostic/:id/quick-fix', authenticateToken, videoController.quickFixVideoMetadata);
 router.put('/:id', authenticateToken, videoController.updateVideo);
 router.delete('/:id', authenticateToken, videoController.deleteVideo);
+
+// Restore deleted video
+router.post('/:id/restore', authenticateToken, videoController.restoreVideo);
+
+// Permanently delete video (hard delete)
+router.delete('/:id/permanent', authenticateToken, videoController.permanentDeleteVideo);
+
 router.get('/:videoId/versions', authenticateToken, videoController.getVideoVersions);
 
 // Get video diagnostic information (must be before /:videoId route)

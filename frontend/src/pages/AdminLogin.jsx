@@ -4,7 +4,6 @@ import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Logo from '../components/ui/Logo';
-import SocialAuth from '../components/ui/SocialAuth';
 import api from '../services/api';
 
 /**
@@ -14,7 +13,6 @@ import api from '../services/api';
  * - Split screen design (branding left, form right)
  * - Modern floating label inputs
  * - Loading and success states
- * - Social authentication options
  * - Responsive design
  */
 function AdminLogin() {
@@ -73,10 +71,10 @@ function AdminLogin() {
   };
 
   return (
-    <div className="min-h-screen w-full flex bg-white overflow-hidden antialiased text-slate-900">
+    <div className="h-screen w-full flex bg-white overflow-hidden antialiased text-slate-900">
       
       {/* Left Panel - Branding & Visuals (Hidden on mobile) */}
-      <div className="hidden lg:flex w-[55%] relative flex-col justify-between p-12 bg-slate-900 overflow-hidden">
+      <div className="hidden lg:flex w-[55%] h-full relative flex-col p-12 bg-slate-900 overflow-hidden">
         {/* Background Image with Overlay */}
         <div className="absolute inset-0 z-0">
           <img 
@@ -87,12 +85,13 @@ function AdminLogin() {
           <div className="absolute inset-0 bg-gradient-to-br from-brand-900/90 to-slate-900/90" />
         </div>
 
-        {/* Brand Content */}
+        {/* Logo at top left */}
         <div className="relative z-10">
-          <Logo variant="light" className="mb-8" />
+          <Logo variant="light" />
         </div>
 
-        <div className="relative z-10 max-w-xl">
+        {/* Brand Content - Centered */}
+        <div className="relative z-10 max-w-xl mt-auto mb-auto">
            <h1 className="text-5xl font-bold text-white mb-6 leading-tight">
              Stream your content with <span className="text-brand-400">confidence</span>.
            </h1>
@@ -100,16 +99,10 @@ function AdminLogin() {
              Join thousands of educators and organizations using Video Delivery to manage and distribute their video content efficiently.
            </p>
         </div>
-        
-        <div className="relative z-10 text-slate-400 text-sm flex gap-6">
-          <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-          <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-          <span className="ml-auto">© 2024 Video Delivery</span>
-        </div>
       </div>
 
       {/* Right Panel - Login Form */}
-      <div className="w-full lg:w-[45%] flex items-center justify-center p-6 sm:p-12 lg:p-24 bg-white relative">
+      <div className="w-full lg:w-[45%] h-full flex items-center justify-center p-6 sm:p-12 lg:p-24 bg-white relative overflow-y-auto">
         <div className="w-full max-w-md space-y-8 animate-fade-in">
           
           {/* Mobile Logo */}
@@ -133,22 +126,15 @@ function AdminLogin() {
                 autoComplete="username"
                 required
               />
-              <div className="space-y-1">
-                <Input
-                  label="Password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  error={error && !password ? 'Password is required' : undefined}
-                  autoComplete="current-password"
-                  required
-                />
-                <div className="flex justify-end">
-                   <a href="#" className="text-sm font-medium text-brand-600 hover:text-brand-700 transition-colors">
-                     Forgot password?
-                   </a>
-                </div>
-              </div>
+              <Input
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                error={error && !password ? 'Password is required' : undefined}
+                autoComplete="current-password"
+                required
+              />
             </div>
 
             {error && (
@@ -174,24 +160,6 @@ function AdminLogin() {
               )}
             </Button>
           </form>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200" />
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-white text-slate-500">Or continue with</span>
-            </div>
-          </div>
-
-          <SocialAuth />
-
-          <p className="text-center text-sm text-slate-600 mt-8">
-            Need help?{' '}
-            <a href="#" className="font-semibold text-brand-600 hover:text-brand-700 hover:underline">
-              Contact Support
-            </a>
-          </p>
         </div>
       </div>
     </div>

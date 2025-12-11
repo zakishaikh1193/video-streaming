@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
+import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
 import PublicVideoPage from './pages/PublicVideoPage';
 import AdminLogin from './pages/AdminLogin';
@@ -29,18 +30,19 @@ function App() {
         <Route path="diagnostic" element={<StreamDiagnostic />} />
         <Route path="diagnostic/:videoId" element={<StreamDiagnostic />} />
         <Route path="admin/login" element={<AdminLogin />} />
-        <Route path="admin" element={<AdminDashboard />} />
-        <Route path="admin/upload" element={<VideoUpload />} />
-        <Route path="admin/bulk-upload" element={<BulkUpload />} />
-        <Route path="admin/videos" element={<VideoList />} />
-        <Route path="admin/videos/:id/edit" element={<VideoEdit />} />
-        <Route path="admin/qr-codes" element={<QRCodeStorage />} />
-        <Route path="admin/trash" element={<VideosTrash />} />
-        <Route path="admin/cloudflare" element={<MyStorageManager />} />
-        <Route path="admin/redirects" element={<RedirectViewer />} />
-        <Route path="admin/users" element={<UserManagement />} />
-        <Route path="admin/captions/:videoId" element={<CaptionUpload />} />
-        <Route path="admin/versions/:videoId" element={<VersionHistory />} />
+
+        <Route path="admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+        <Route path="admin/upload" element={<ProtectedRoute><VideoUpload /></ProtectedRoute>} />
+        <Route path="admin/bulk-upload" element={<ProtectedRoute><BulkUpload /></ProtectedRoute>} />
+        <Route path="admin/videos" element={<ProtectedRoute><VideoList /></ProtectedRoute>} />
+        <Route path="admin/videos/:id/edit" element={<ProtectedRoute><VideoEdit /></ProtectedRoute>} />
+        <Route path="admin/qr-codes" element={<ProtectedRoute><QRCodeStorage /></ProtectedRoute>} />
+        <Route path="admin/cloudflare" element={<ProtectedRoute><MyStorageManager /></ProtectedRoute>} />
+        <Route path="admin/redirects" element={<ProtectedRoute><RedirectViewer /></ProtectedRoute>} />
+        <Route path="admin/users" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
+        <Route path="admin/captions/:videoId" element={<ProtectedRoute><CaptionUpload /></ProtectedRoute>} />
+        <Route path="admin/versions/:videoId" element={<ProtectedRoute><VersionHistory /></ProtectedRoute>} />
+
         {/* Catch-all route for short URLs - must be last */}
         <Route path=":slug" element={<ShortUrlRedirect />} />
       </Route>

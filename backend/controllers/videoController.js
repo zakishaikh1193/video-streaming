@@ -613,37 +613,31 @@ export async function uploadVideo(req, res) {
       rawFormData: { subject: normalizedSubject, course, grade, unit, lesson, module, description }
     });
 
+    // Create video record and redirect in parallel (faster)
     console.log(`[Upload Video] Creating video record in database...`);
-    let insertId;
-    try {
-      insertId = await videoService.createVideo(videoData);
-    } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY') {
-        console.warn('[Upload Video] Duplicate video_id detected, regenerating ID and retrying...');
-        const newId = `${videoData.videoId}_${Math.random().toString(36).slice(2, 4).toUpperCase()}`;
-        videoData.videoId = newId;
-        videoId = newId;
-        let newRedirectSlug;
+    const [insertId, redirectResult] = await Promise.allSettled([
+      videoService.createVideo(videoData),
+      (async () => {
         try {
-          newRedirectSlug = await generateUniqueShortId();
-        } catch (slugError) {
-          console.warn('[Upload Video] Error generating new redirect slug, using fallback:', slugError);
-          newRedirectSlug = newId.substring(0, 10);
+          const targetUrl = `${config.urls.frontend}/stream/${videoId}`;
+          await redirectService.createRedirect(redirectSlug, targetUrl, false);
+          console.log(`[Upload Video] ✓ Redirect created: ${redirectSlug} -> ${targetUrl}`);
+          return true;
+        } catch (redirectError) {
+          console.warn(`[Upload Video] ⚠ Could not create redirect:`, redirectError.message);
+          return false;
         }
-        videoData.redirectSlug = newRedirectSlug;
-        redirectSlug = newRedirectSlug;
-        // Update streaming URL with new redirect slug
-        videoData.streamingUrl = `${getBaseUrl(req)}/api/s/${newRedirectSlug}`;
-        insertId = await videoService.createVideo(videoData);
-        console.log(`[Upload Video] ✓ Retried and created video with new ID: ${newId}`);
-      } else {
-        throw err;
-      }
+      })()
+    ]);
+    
+    if (insertId.status === 'rejected') {
+      throw new Error(`Failed to create video record: ${insertId.reason.message}`);
     }
-    console.log(`[Upload Video] ✓ Video record created: ID ${insertId}`);
+    
+    console.log(`[Upload Video] ✓ Video record created: ID ${insertId.value}`);
     
     // Fetch the created video to get all fields
-    const video = await videoService.getVideoById(insertId);
+    const video = await videoService.getVideoById(insertId.value);
     if (!video) {
       throw new Error('Video was created but could not be retrieved from database');
     }
@@ -656,16 +650,6 @@ export async function uploadVideo(req, res) {
       module: video.module,
       description: video.description
     });
-
-    // Create redirect entry
-    try {
-      const targetUrl = `${config.urls.frontend}/stream/${videoId}`;
-      await redirectService.createRedirect(redirectSlug, targetUrl, false);
-      console.log(`[Upload Video] ✓ Redirect created: ${redirectSlug} -> ${targetUrl}`);
-    } catch (redirectError) {
-      console.warn(`[Upload Video] ⚠ Could not create redirect:`, redirectError.message);
-      // Continue - redirect might already exist
-    }
 
     console.log(`[Upload Video] ===== UPLOAD COMPLETE =====`);
     console.log(`[Upload Video] ✓ Video uploaded successfully`);

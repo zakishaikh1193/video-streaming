@@ -50,12 +50,60 @@ export async function getRedirectBySlug(slug) {
 }
 
 /**
- * Get all redirects
+ * Get all redirects - only for active videos (not deleted)
+ * Returns only recent/active redirects with QR codes
  */
 export async function getAllRedirects() {
-  const query = 'SELECT * FROM redirects ORDER BY created_at DESC';
+  // Join with videos table to filter only active videos
+  // Only show redirects that belong to active videos
+  const query = `
+    SELECT DISTINCT 
+      r.id,
+      r.slug,
+      r.target_url,
+      r.created_at,
+      r.updated_at,
+      v.video_id,
+      v.title,
+      v.status,
+      v.redirect_slug,
+      v.qr_url,
+      v.subject,
+      v.grade,
+      v.lesson,
+      v.module
+    FROM redirects r
+    LEFT JOIN videos v ON (
+      r.slug = v.redirect_slug 
+      OR r.slug = v.video_id
+    )
+    WHERE (v.status = 'active' OR (v.status IS NULL AND r.slug NOT IN (
+      SELECT COALESCE(redirect_slug, video_id) 
+      FROM videos 
+      WHERE status = 'deleted' 
+        AND (redirect_slug IS NOT NULL OR video_id IS NOT NULL)
+    )))
+    ORDER BY 
+      CASE WHEN v.updated_at IS NOT NULL THEN v.updated_at ELSE r.created_at END DESC,
+      r.created_at DESC
+    LIMIT 500
+  `;
+  
   const [rows] = await pool.execute(query);
-  return rows;
+  
+  // Additional filter: only return redirects for active videos
+  const activeRedirects = rows.filter(row => {
+    // If we have a video match, it must be active
+    if (row.video_id && row.status) {
+      return row.status === 'active';
+    }
+    // If no video match but redirect exists, include it (standalone redirect)
+    return true;
+  });
+  
+  console.log(`[getAllRedirects] Found ${activeRedirects.length} active redirects (filtered from ${rows.length} total)`);
+  
+  return activeRedirects;
 }
 
 /**

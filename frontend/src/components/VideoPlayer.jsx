@@ -70,12 +70,11 @@ const videoPlayerStyles = `
     visibility: visible !important;
     opacity: 1 !important;
   }
-  .video-js .vjs-play-control.vjs-playing .vjs-icon-placeholder::before {
-    content: "\\f101"; /* Pause icon */
+  /* Hide play control completely */
+  .video-js .vjs-play-control {
+    display: none !important;
   }
-  .video-js .vjs-play-control.vjs-paused .vjs-icon-placeholder::before {
-    content: "\\f101"; /* Play icon */
-  }
+  /* Use default Video.js icons for play/pause */
   /* Progress bar styling - positioned at top */
   .video-js .vjs-progress-control {
     position: absolute;
@@ -539,7 +538,7 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
       // YouTube-like control bar layout - properly arranged controls
       controlBar: {
         children: [
-          'playToggle', // Play/Pause button (automatically toggles)
+          // Removed: playToggle (play/pause button)
           'volumePanel', // Volume control
           'progressControl', // Progress bar
           'liveDisplay',
@@ -547,7 +546,6 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
           'spacer', // Flexible spacer to push controls to right
           'subsCapsButton', // Closed Captions button
           'fullscreenToggle' // Fullscreen
-          // Removed: 'subsCapsButton' (Closed Captions - not needed)
           // Removed: 'currentTimeDisplay', 'timeDivider', 'durationDisplay' (Time display)
           // Removed: 'playbackRateMenuButton' (now in settings menu)
           // Removed: 'pictureInPictureToggle' (not needed)
@@ -665,63 +663,6 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
       // Ensure all control buttons are visible and properly styled
       const controlBar = player.controlBar;
       if (controlBar) {
-        // Ensure play/pause toggle is visible and working
-        const playToggle = controlBar.getChild('playToggle');
-        if (playToggle) {
-          playToggle.show();
-          
-          // Ensure play/pause button is clickable and works
-          const playBtn = playToggle.el();
-          if (playBtn) {
-            playBtn.style.pointerEvents = 'auto';
-            playBtn.style.cursor = 'pointer';
-            playBtn.style.display = 'flex';
-            playBtn.style.visibility = 'visible';
-            
-            // Add explicit click handler to ensure it works
-            playBtn.addEventListener('click', (e) => {
-              e.stopPropagation();
-              try {
-                if (player.paused()) {
-                  player.play().catch(err => {
-                    console.error('Play error:', err);
-                  });
-                } else {
-                  player.pause();
-                }
-              } catch (err) {
-                console.error('Play/Pause error:', err);
-              }
-            });
-          }
-          
-          // Ensure play/pause button toggles correctly on state change
-          player.on('play', () => {
-            const playBtn = playToggle.el();
-            if (playBtn) {
-              playBtn.classList.remove('vjs-paused');
-              playBtn.classList.add('vjs-playing');
-            }
-            // Hide big play button when playing
-            const bigPlayBtn = player.getChild('bigPlayButton');
-            if (bigPlayBtn) {
-              bigPlayBtn.hide();
-            }
-          });
-          player.on('pause', () => {
-            const playBtn = playToggle.el();
-            if (playBtn) {
-              playBtn.classList.remove('vjs-playing');
-              playBtn.classList.add('vjs-paused');
-            }
-            // Show big play button when paused
-            const bigPlayBtn = player.getChild('bigPlayButton');
-            if (bigPlayBtn) {
-              bigPlayBtn.show();
-            }
-          });
-        }
-
         // Remove captions button completely (not in controlBar children anymore)
         const captionsBtn = controlBar.getChild('subsCapsButton');
         if (captionsBtn) {

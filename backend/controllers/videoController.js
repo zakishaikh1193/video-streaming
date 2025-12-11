@@ -788,6 +788,15 @@ export async function uploadVideo(req, res) {
 
     // Create video record and redirect in parallel (faster)
     console.log(`[Upload Video] Creating video record in database...`);
+    // Get user ID from auth token if available
+    // JWT token contains userId which could be a number or string
+    const userId = req.user?.userId ? (parseInt(req.user.userId) || req.user.userId) : null;
+    if (userId) {
+      videoData.createdBy = userId;
+      console.log(`[Upload Video] Tracking upload by user ID: ${userId}`);
+    } else {
+      console.warn(`[Upload Video] No user ID found in token - upload will not be tracked to a specific user`);
+    }
     const [insertId, redirectResult] = await Promise.allSettled([
       videoService.createVideo(videoData),
       (async () => {
@@ -1907,11 +1916,14 @@ export async function getDeletedVideos(req, res) {
     const [deletedVideos] = await pool.execute(query);
     
     // Build response with QR code data
-    const baseUrl = config.urls?.base || config.urls?.frontend || 'http://localhost:5000';
+    // Use redirect slug format: http://localhost:5173/{redirect_slug} (same as QR Code Storage)
+    const frontendUrl = config.urls?.frontend || 'http://localhost:5173';
     const videos = deletedVideos.map(video => {
+      // Use redirect slug format: {frontendUrl}/{redirect_slug}
+      // If no redirect_slug, fallback to video page link
       const shortUrl = video.redirect_slug 
-        ? `${baseUrl}/s/${video.redirect_slug}`
-        : video.streaming_url || `${baseUrl}/stream/${video.video_id}`;
+        ? `${frontendUrl}/${video.redirect_slug}`
+        : `${frontendUrl}/stream/${video.video_id}`;
       
       return {
         id: video.id,
@@ -1925,7 +1937,7 @@ export async function getDeletedVideos(req, res) {
         module: video.module || null,
         topic: video.topic || null,
         shortSlug: video.redirect_slug || null,
-        shortUrl: shortUrl,
+        shortUrl: shortUrl, // Redirect slug format: {frontendUrl}/{redirect_slug}
         qrUrl: video.qr_url || null,
         streamingUrl: video.streaming_url || null,
         createdAt: video.created_at,
@@ -1969,6 +1981,66 @@ export async function getDeletedVideos(req, res) {
   }
 }
 
+export async function permanentDeleteVideo(req, res) {
+  try {
+    const { id } = req.params;
+    console.log(`[Permanent Delete] Permanently deleting video with ID: ${id}`);
+    
+    const success = await videoService.permanentDeleteVideo(id);
+    if (success) {
+      console.log(`[Permanent Delete] Video ${id} permanently deleted successfully`);
+      res.json({ 
+        success: true,
+        message: 'Video permanently deleted successfully' 
+      });
+    } else {
+      res.status(404).json({ 
+        success: false,
+        error: 'Video not found or already deleted' 
+      });
+    }
+  } catch (error) {
+    console.error('[Permanent Delete] Error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to permanently delete video',
+      message: error.message 
+    });
+  }
+}
+
+export async function permanentDeleteVideos(req, res) {
+  try {
+    const { ids } = req.body;
+    
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'No video IDs provided' 
+      });
+    }
+
+    console.log(`[Bulk Permanent Delete] Permanently deleting ${ids.length} videos`);
+    const results = await videoService.permanentDeleteVideos(ids);
+    
+    console.log(`[Bulk Permanent Delete] Deleted ${results.deleted} out of ${ids.length} videos`);
+    res.json({
+      success: results.success,
+      deleted: results.deleted,
+      total: ids.length,
+      errors: results.errors,
+      message: `Successfully deleted ${results.deleted} out of ${ids.length} videos`
+    });
+  } catch (error) {
+    console.error('[Bulk Permanent Delete] Error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to permanently delete videos',
+      message: error.message 
+    });
+  }
+}
+
 export async function restoreVideo(req, res) {
   try {
     const { id } = req.params;
@@ -2008,12 +2080,14 @@ export async function getAllQRCodes(req, res) {
     const [videos] = await pool.execute(query);
     
     // Build QR code data with short URLs
+    // Use redirect slug format: http://localhost:5173/{redirect_slug} (e.g., http://localhost:5173/h13cidw56d)
+    const frontendUrl = config.urls?.frontend || 'http://localhost:5173';
     const qrCodes = videos.map(video => {
-      // Build short URL from redirect_slug
-      const baseUrl = config.urls?.base || config.urls?.frontend || 'http://localhost:5000';
+      // Use redirect slug format: {frontendUrl}/{redirect_slug}
+      // If no redirect_slug, fallback to video page link
       const shortUrl = video.redirect_slug 
-        ? `${baseUrl}/s/${video.redirect_slug}`
-        : video.streaming_url || `${baseUrl}/stream/${video.video_id}`;
+        ? `${frontendUrl}/${video.redirect_slug}`
+        : `${frontendUrl}/stream/${video.video_id}`;
       
       return {
         videoId: video.video_id,
@@ -2026,7 +2100,7 @@ export async function getAllQRCodes(req, res) {
         module: video.module || null,
         topic: video.topic || null,
         shortSlug: video.redirect_slug || null,
-        shortUrl: shortUrl,
+        shortUrl: shortUrl, // Redirect slug format: {frontendUrl}/{redirect_slug}
         qrUrl: video.qr_url || null,
         streamingUrl: video.streaming_url || null,
         createdAt: video.created_at,
@@ -2451,6 +2525,139 @@ export async function generateVideosCSV(req, res) {
     res.send('\ufeff' + csvContent);
   } catch (error) {
     console.error('Generate videos CSV error:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate CSV', 
+      message: error.message 
+    });
+  }
+}
+
+export async function generateFilteredVideosCSV(req, res) {
+  try {
+    const { subject, grade, lesson } = req.query;
+    
+    console.log('[Generate Filtered CSV] Filters:', { subject, grade, lesson });
+    
+    // Build filters object
+    const filters = { status: 'active' };
+    if (subject && subject !== 'all') {
+      filters.subject = subject;
+    }
+    if (grade && grade !== 'all') {
+      filters.grade = grade;
+    }
+    if (lesson && lesson !== 'all') {
+      filters.lesson = lesson;
+    }
+    
+    // Get filtered videos
+    const videos = await videoService.getAllVideos(filters);
+    
+    if (videos.length === 0) {
+      return res.status(400).json({ error: 'No videos found matching the selected filters' });
+    }
+
+    // CSV headers as requested: Subject, Grade, Lesson, QR code name, Playlist ID, PlaylistTitle, Description, Short URL
+    const headers = ['Subject', 'Grade', 'Lesson', 'QR code name', 'Playlist ID', 'PlaylistTitle', 'Description', 'Short URL'];
+    
+    // Build base URL - use frontend URL (same as video page)
+    const frontendUrl = config.urls?.frontend || config.urls?.base || 'http://localhost:5173';
+    
+    // Build rows from videos
+    const rows = videos.map(video => {
+      // Subject
+      const subjectValue = video.subject || video.course || '';
+      
+      // Grade
+      const gradeValue = video.grade || '';
+      
+      // Lesson
+      const lessonValue = video.lesson || '';
+      
+      // QR code name - generate filename in format G{grade}_L{lesson}_U{course}_M{module}.png (same as download)
+      // This matches the exact filename format used when downloading QR codes from QR Code Storage
+      // Format: G1_L1_Uw_M1.png - this is the QR code download filename with .png extension
+      const parts = [];
+      if (video.grade !== null && video.grade !== undefined && String(video.grade).trim() !== '') {
+        parts.push(`G${video.grade}`);
+      }
+      if (video.lesson !== null && video.lesson !== undefined && String(video.lesson).trim() !== '') {
+        parts.push(`L${video.lesson}`);
+      }
+      // Use course/subject for U part (matches download logic: videoData?.course)
+      const courseValue = video.course || video.subject;
+      if (courseValue !== null && courseValue !== undefined && String(courseValue).trim() !== '') {
+        parts.push(`U${courseValue}`);
+      }
+      if (video.module !== null && video.module !== undefined && String(video.module).trim() !== '') {
+        parts.push(`M${video.module}`);
+      }
+      
+      // Always use the format with .png extension (matches QR code download filename exactly)
+      // This is the actual QR code download filename format, NOT video_id
+      const qrCodeName = parts.length > 0 
+        ? parts.join('_') + '.png'
+        : ''; // Empty if no parts (don't use video_id - user wants QR code download name format only)
+      
+      // Playlist ID - use redirect_slug or video_id
+      const playlistId = video.redirect_slug || video.video_id || '';
+      
+      // PlaylistTitle - use title
+      const playlistTitle = video.title || video.video_id || 'Untitled';
+      
+      // Description
+      const description = video.description || '';
+      
+      // Short URL - use the format from video edit page: {frontendUrl}/{redirect_slug}
+      // This matches the "SHORT URL" shown in the video edit page (e.g., http://localhost:5173/gpg2i6w6fj)
+      const shortUrl = video.redirect_slug 
+        ? `${frontendUrl}/${video.redirect_slug}`
+        : `${frontendUrl}/stream/${video.video_id}`;
+      
+      return [
+        subjectValue,
+        gradeValue,
+        lessonValue,
+        qrCodeName,
+        playlistId,
+        playlistTitle,
+        description,
+        shortUrl
+      ];
+    });
+
+    // Escape CSV values
+    const escapeCSV = (value) => {
+      const cellStr = String(value || '').trim();
+      if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n') || cellStr.includes('\r')) {
+        return `"${cellStr.replace(/"/g, '""')}"`;
+      }
+      return cellStr;
+    };
+
+    // Build CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(escapeCSV).join(','))
+    ].join('\r\n');
+
+    // Generate filename with filters
+    let filename = 'videos_export';
+    if (subject && subject !== 'all') filename += `_subject_${subject}`;
+    if (grade && grade !== 'all') filename += `_grade_${grade}`;
+    if (lesson && lesson !== 'all') filename += `_lesson_${lesson}`;
+    filename += `_${Date.now()}.csv`;
+
+    // Set response headers for CSV download
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    // Send CSV with BOM for Excel compatibility
+    res.send('\ufeff' + csvContent);
+    
+    console.log(`[Generate Filtered CSV] Generated CSV with ${videos.length} videos`);
+  } catch (error) {
+    console.error('[Generate Filtered CSV] Error:', error);
     res.status(500).json({ 
       error: 'Failed to generate CSV', 
       message: error.message 

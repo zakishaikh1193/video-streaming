@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Edit, Trash2, Search, X, Check, XCircle, Eye, EyeOff } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, X, Check, XCircle, Eye, EyeOff, ChevronDown, ChevronUp, Upload, Trash2 as DeleteIcon, Clock } from 'lucide-react';
 import api from '../services/api';
 
 function UserManagement() {
@@ -27,6 +27,9 @@ function UserManagement() {
     total: 0,
     totalPages: 0
   });
+  const [expandedUsers, setExpandedUsers] = useState(new Set());
+  const [userActivities, setUserActivities] = useState({});
+  const [loadingActivities, setLoadingActivities] = useState({});
 
   useEffect(() => {
     fetchUsers();
@@ -177,6 +180,51 @@ function UserManagement() {
     }
   };
 
+  const toggleUserExpanded = async (userId) => {
+    const newExpanded = new Set(expandedUsers);
+    if (newExpanded.has(userId)) {
+      newExpanded.delete(userId);
+    } else {
+      newExpanded.add(userId);
+      // Load activity if not already loaded
+      if (!userActivities[userId]) {
+        await fetchUserActivity(userId);
+      }
+    }
+    setExpandedUsers(newExpanded);
+  };
+
+  const fetchUserActivity = async (userId) => {
+    try {
+      setLoadingActivities(prev => ({ ...prev, [userId]: true }));
+      const response = await api.get(`/users/${userId}/activity`);
+      setUserActivities(prev => ({
+        ...prev,
+        [userId]: response.data
+      }));
+    } catch (error) {
+      console.error(`Failed to fetch activity for user ${userId}:`, error);
+      setUserActivities(prev => ({
+        ...prev,
+        [userId]: { error: 'Failed to load activity' }
+      }));
+    } finally {
+      setLoadingActivities(prev => ({ ...prev, [userId]: false }));
+    }
+  };
+
+  const formatDateTime = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   if (loading && users.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -267,91 +315,285 @@ function UserManagement() {
                 </tr>
               ) : (
                 users.map((user) => (
-                  <tr key={user.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10">
-                          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center">
-                            <span className="text-white font-semibold">
-                              {user.username.charAt(0).toUpperCase()}
-                            </span>
+                  <>
+                    <tr key={user.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 h-10 w-10">
+                            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center">
+                              <span className="text-white font-semibold">
+                                {user.username.charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-semibold text-slate-900">
+                              {user.full_name || user.username}
+                            </div>
+                            <div className="text-sm text-slate-600">{user.username}</div>
+                            {user.email && (
+                              <div className="text-xs text-slate-400">{user.email}</div>
+                            )}
                           </div>
                         </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-semibold text-slate-900">
-                            {user.full_name || user.username}
-                          </div>
-                          <div className="text-sm text-slate-600">{user.username}</div>
-                          {user.email && (
-                            <div className="text-xs text-slate-400">{user.email}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getRoleBadgeColor(user.role)}`}>
+                          {user.role || 'viewer'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          {user.can_upload_videos && (
+                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                              Upload
+                            </span>
+                          )}
+                          {user.can_view_videos && (
+                            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                              View
+                            </span>
+                          )}
+                          {user.can_check_links && (
+                            <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
+                              Links
+                            </span>
+                          )}
+                          {user.can_check_qr_codes && (
+                            <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">
+                              QR Codes
+                            </span>
                           )}
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getRoleBadgeColor(user.role)}`}>
-                        {user.role || 'viewer'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-2">
-                        {user.can_upload_videos && (
-                          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                            Upload
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {user.is_active ? (
+                          <span className="flex items-center gap-1 text-green-600">
+                            <Check className="w-4 h-4" />
+                            Active
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-red-600">
+                            <XCircle className="w-4 h-4" />
+                            Inactive
                           </span>
                         )}
-                        {user.can_view_videos && (
-                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                            View
-                          </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
+                        {new Date(user.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => toggleUserExpanded(user.id)}
+                            className="text-indigo-600 hover:text-indigo-700 p-2 hover:bg-indigo-50 rounded-xl transition-colors"
+                            title="View activity"
+                          >
+                            {expandedUsers.has(user.id) ? (
+                              <ChevronUp className="w-4 h-4" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleEdit(user)}
+                            className="text-blue-600 hover:text-blue-700 p-2 hover:bg-blue-50 rounded-xl transition-colors"
+                            title="Edit user"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(user.id)}
+                            className="text-red-600 hover:text-red-700 p-2 hover:bg-red-50 rounded-xl transition-colors"
+                            title="Delete user"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {/* Expanded Activity Section */}
+                    {expandedUsers.has(user.id) && (
+                      <tr key={`${user.id}-activity`}>
+                        <td colSpan="6" className="px-6 py-4 bg-slate-50">
+                        {loadingActivities[user.id] ? (
+                          <div className="flex items-center justify-center py-8">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                            <span className="ml-3 text-slate-600">Loading activity...</span>
+                          </div>
+                        ) : userActivities[user.id]?.error ? (
+                          <div className="text-center py-4 text-red-600">
+                            {userActivities[user.id].error}
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {/* Uploads Section */}
+                            <div className="bg-white rounded-lg border border-blue-200 overflow-hidden">
+                              <button
+                                onClick={() => {
+                                  const newExpanded = new Set(expandedUsers);
+                                  const uploadKey = `${user.id}-uploads`;
+                                  if (newExpanded.has(uploadKey)) {
+                                    newExpanded.delete(uploadKey);
+                                  } else {
+                                    newExpanded.add(uploadKey);
+                                  }
+                                  setExpandedUsers(newExpanded);
+                                }}
+                                className="w-full px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-colors flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Upload className="w-5 h-5 text-blue-600" />
+                                  <span className="font-semibold text-slate-900">
+                                    Uploads ({userActivities[user.id]?.activities?.uploads?.length || 0})
+                                  </span>
+                                </div>
+                                {expandedUsers.has(`${user.id}-uploads`) ? (
+                                  <ChevronUp className="w-5 h-5 text-slate-600" />
+                                ) : (
+                                  <ChevronDown className="w-5 h-5 text-slate-600" />
+                                )}
+                              </button>
+                              {expandedUsers.has(`${user.id}-uploads`) && (
+                                <div className="p-4 max-h-96 overflow-y-auto">
+                                  {userActivities[user.id]?.activities?.uploads?.length > 0 ? (
+                                    <div className="space-y-2">
+                                      {userActivities[user.id].activities.uploads.map((upload) => (
+                                        <div
+                                          key={upload.id}
+                                          className="p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-blue-300 transition-colors"
+                                        >
+                                          <div className="flex items-start justify-between">
+                                            <div className="flex-1">
+                                              <div className="font-semibold text-slate-900">{upload.title || upload.video_id}</div>
+                                              <div className="text-sm text-slate-600 mt-1">
+                                                Video ID: {upload.video_id}
+                                              </div>
+                                              {(upload.subject || upload.grade || upload.lesson) && (
+                                                <div className="flex gap-2 mt-2">
+                                                  {upload.subject && (
+                                                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                                      {upload.subject}
+                                                    </span>
+                                                  )}
+                                                  {upload.grade && (
+                                                    <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                                                      Grade {upload.grade}
+                                                    </span>
+                                                  )}
+                                                  {upload.lesson && (
+                                                    <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">
+                                                      Lesson {upload.lesson}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </div>
+                                            <div className="text-right text-xs text-slate-500 ml-4">
+                                              <div className="flex items-center gap-1">
+                                                <Clock className="w-3 h-3" />
+                                                {formatDateTime(upload.created_at)}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="text-center py-4 text-slate-500">
+                                      No uploads found
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Deletes Section */}
+                            <div className="bg-white rounded-lg border border-red-200 overflow-hidden">
+                              <button
+                                onClick={() => {
+                                  const newExpanded = new Set(expandedUsers);
+                                  const deleteKey = `${user.id}-deletes`;
+                                  if (newExpanded.has(deleteKey)) {
+                                    newExpanded.delete(deleteKey);
+                                  } else {
+                                    newExpanded.add(deleteKey);
+                                  }
+                                  setExpandedUsers(newExpanded);
+                                }}
+                                className="w-full px-4 py-3 bg-gradient-to-r from-red-50 to-rose-50 hover:from-red-100 hover:to-rose-100 transition-colors flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <DeleteIcon className="w-5 h-5 text-red-600" />
+                                  <span className="font-semibold text-slate-900">
+                                    Deletes ({userActivities[user.id]?.activities?.deletes?.length || 0})
+                                  </span>
+                                </div>
+                                {expandedUsers.has(`${user.id}-deletes`) ? (
+                                  <ChevronUp className="w-5 h-5 text-slate-600" />
+                                ) : (
+                                  <ChevronDown className="w-5 h-5 text-slate-600" />
+                                )}
+                              </button>
+                              {expandedUsers.has(`${user.id}-deletes`) && (
+                                <div className="p-4 max-h-96 overflow-y-auto">
+                                  {userActivities[user.id]?.activities?.deletes?.length > 0 ? (
+                                    <div className="space-y-2">
+                                      {userActivities[user.id].activities.deletes.map((deleted) => (
+                                        <div
+                                          key={deleted.id}
+                                          className="p-3 bg-red-50 rounded-lg border border-red-200 hover:border-red-300 transition-colors"
+                                        >
+                                          <div className="flex items-start justify-between">
+                                            <div className="flex-1">
+                                              <div className="font-semibold text-slate-900">{deleted.title || deleted.video_id}</div>
+                                              <div className="text-sm text-slate-600 mt-1">
+                                                Video ID: {deleted.video_id}
+                                              </div>
+                                              {(deleted.subject || deleted.grade || deleted.lesson) && (
+                                                <div className="flex gap-2 mt-2">
+                                                  {deleted.subject && (
+                                                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                                      {deleted.subject}
+                                                    </span>
+                                                  )}
+                                                  {deleted.grade && (
+                                                    <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                                                      Grade {deleted.grade}
+                                                    </span>
+                                                  )}
+                                                  {deleted.lesson && (
+                                                    <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">
+                                                      Lesson {deleted.lesson}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </div>
+                                            <div className="text-right text-xs text-slate-500 ml-4">
+                                              <div className="flex items-center gap-1">
+                                                <Clock className="w-3 h-3" />
+                                                {formatDateTime(deleted.deleted_at || deleted.updated_at)}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="text-center py-4 text-slate-500">
+                                      No deletes found
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         )}
-                        {user.can_check_links && (
-                          <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
-                            Links
-                          </span>
-                        )}
-                        {user.can_check_qr_codes && (
-                          <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">
-                            QR Codes
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {user.is_active ? (
-                        <span className="flex items-center gap-1 text-green-600">
-                          <Check className="w-4 h-4" />
-                          Active
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-red-600">
-                          <XCircle className="w-4 h-4" />
-                          Inactive
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
-                      {new Date(user.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => handleEdit(user)}
-                          className="text-blue-600 hover:text-blue-700 p-2 hover:bg-blue-50 rounded-xl transition-colors"
-                          title="Edit user"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(user.id)}
-                          className="text-red-600 hover:text-red-700 p-2 hover:bg-red-50 rounded-xl transition-colors"
-                          title="Delete user"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                    )}
+                  </>
                 ))
               )}
             </tbody>

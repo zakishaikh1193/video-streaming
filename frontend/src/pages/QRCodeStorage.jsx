@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, Copy, Check, Search, Filter, AlertCircle, Settings } from 'lucide-react';
+import { Download, Copy, Check, Search, Filter, AlertCircle, Settings, CheckSquare, Square } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../services/api';
 import QRCodeDiagnostic from '../components/QRCodeDiagnostic';
@@ -50,14 +50,32 @@ function QRCodeStorage() {
   const [copiedId, setCopiedId] = useState(null);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [showDiagnostic, setShowDiagnostic] = useState(false);
+  
+  // Filter options (Subject, Grade, Lesson)
+  const [filterOptions, setFilterOptions] = useState({
+    subjects: [],
+    grades: [],
+    lessons: []
+  });
+  const [selectedFilters, setSelectedFilters] = useState({
+    subject: 'all',
+    grade: 'all',
+    lesson: 'all'
+  });
+  
+  // Selection for bulk download
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [downloadingIds, setDownloadingIds] = useState(new Set());
+  const [isBulkDownloading, setIsBulkDownloading] = useState(false);
 
   useEffect(() => {
     loadQRCodes();
+    loadFilterOptions();
   }, []);
 
   useEffect(() => {
     filterQRCodes();
-  }, [searchTerm, selectedFilter, qrCodes]);
+  }, [searchTerm, selectedFilter, selectedFilters, qrCodes]);
 
   const loadQRCodes = async () => {
     try {
@@ -103,6 +121,21 @@ function QRCodeStorage() {
     }
   };
 
+  const loadFilterOptions = async () => {
+    try {
+      const response = await api.get('/videos/filters');
+      if (response.data) {
+        setFilterOptions({
+          subjects: response.data.subjects || [],
+          grades: response.data.grades || [],
+          lessons: response.data.lessons || []
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load filter options:', err);
+    }
+  };
+
   const filterQRCodes = () => {
     let filtered = [...qrCodes];
 
@@ -120,7 +153,25 @@ function QRCodeStorage() {
       );
     }
 
-    // Apply category filter
+    // Apply Subject, Grade, Lesson filters
+    if (selectedFilters.subject !== 'all') {
+      filtered = filtered.filter(item => {
+        const itemSubject = item.subject || item.course || '';
+        return String(itemSubject).toLowerCase() === String(selectedFilters.subject).toLowerCase();
+      });
+    }
+    if (selectedFilters.grade !== 'all') {
+      filtered = filtered.filter(item => {
+        return String(item.grade || '') === String(selectedFilters.grade);
+      });
+    }
+    if (selectedFilters.lesson !== 'all') {
+      filtered = filtered.filter(item => {
+        return String(item.lesson || '') === String(selectedFilters.lesson);
+      });
+    }
+
+    // Apply category filter (legacy)
     if (selectedFilter !== 'all') {
       filtered = filtered.filter(item => {
         switch (selectedFilter) {
@@ -173,6 +224,8 @@ function QRCodeStorage() {
         throw new Error('Video ID is required');
       }
       
+      setDownloadingIds(prev => new Set(prev).add(videoId));
+      
       const response = await api.get(`/videos/${videoId}/qr-download`, {
         responseType: 'blob',
         timeout: 30000 // 30 second timeout
@@ -223,7 +276,227 @@ function QRCodeStorage() {
       }
       
       alert(`Failed to download QR code: ${errorMessage}`);
+    } finally {
+      setDownloadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(videoId);
+        return next;
+      });
     }
+  };
+
+  // Selection handlers
+  const handleSelectAll = () => {
+    if (selectedIds.size === filteredQrCodes.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredQrCodes.map(item => item.videoId)));
+    }
+  };
+
+  const handleSelectItem = (videoId) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(videoId)) {
+        next.delete(videoId);
+      } else {
+        next.add(videoId);
+      }
+      return next;
+    });
+  };
+
+  // Helper function to download a single QR code to a file handle
+  const downloadQRToFile = async (videoId, videoData, fileHandle) => {
+    try {
+      const response = await api.get(`/videos/${videoId}/qr-download`, {
+        responseType: 'blob',
+        timeout: 30000
+      });
+      
+      if (!response.data || response.data.size === 0) {
+        throw new Error('Empty response from server');
+      }
+      
+      // Generate filename from Grade + Lesson + Unit in format G1_L1_U1_M1.png
+      const parts = [];
+      if (videoData?.grade) parts.push(`G${videoData.grade}`);
+      if (videoData?.lesson) parts.push(`L${videoData.lesson}`);
+      if (videoData?.course) parts.push(`U${videoData.course}`);
+      if (videoData?.module) parts.push(`M${videoData.module}`);
+      
+      const filename = parts.length > 0 
+        ? parts.join('_') + '.png'
+        : `${videoId}_qr_code.png`;
+      
+      // Create file in the selected folder
+      const file = await fileHandle.getFileHandle(filename, { create: true });
+      const writable = await file.createWritable();
+      await writable.write(response.data);
+      await writable.close();
+      
+      return filename;
+    } catch (err) {
+      console.error(`Failed to download QR code for ${videoId}:`, err);
+      throw err;
+    }
+  };
+
+  // Smart bulk download handler - determines what to download and opens folder picker
+  const handleSmartBulkDownload = async () => {
+    let itemsToDownload = [];
+    let downloadType = '';
+    
+    // Determine what to download based on selection and filters
+    if (selectedIds.size > 0) {
+      // If items are selected, download only selected
+      itemsToDownload = filteredQrCodes.filter(item => selectedIds.has(item.videoId));
+      downloadType = 'selected';
+    } else {
+      // Check if filters are applied
+      const hasFilters = selectedFilters.subject !== 'all' || 
+                        selectedFilters.grade !== 'all' || 
+                        selectedFilters.lesson !== 'all' ||
+                        searchTerm.trim() !== '';
+      
+      if (hasFilters) {
+        // If filters are applied, download filtered items
+        itemsToDownload = filteredQrCodes;
+        downloadType = 'filtered';
+      } else {
+        // Otherwise, download all
+        itemsToDownload = qrCodes;
+        downloadType = 'all';
+      }
+    }
+
+    if (itemsToDownload.length === 0) {
+      alert('No QR codes to download');
+      return;
+    }
+
+    // Check if File System Access API is supported
+    if (!window.showDirectoryPicker) {
+      // Fallback: Use traditional download method (downloads to default Downloads folder)
+      const confirmMessage = `Download ${itemsToDownload.length} QR code${itemsToDownload.length > 1 ? 's' : ''}? They will be saved to your default Downloads folder.`;
+      if (!window.confirm(confirmMessage)) {
+        return;
+      }
+      
+      setIsBulkDownloading(true);
+      try {
+        for (let i = 0; i < itemsToDownload.length; i++) {
+          const item = itemsToDownload[i];
+          setDownloadingIds(prev => new Set(prev).add(item.videoId));
+          try {
+            await handleDownloadQR(item.videoId, item);
+            if (i < itemsToDownload.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          } catch (err) {
+            console.error(`Failed to download QR code for ${item.videoId}:`, err);
+          } finally {
+            setDownloadingIds(prev => {
+              const next = new Set(prev);
+              next.delete(item.videoId);
+              return next;
+            });
+          }
+        }
+        alert(`Successfully downloaded ${itemsToDownload.length} QR code${itemsToDownload.length > 1 ? 's' : ''}`);
+      } finally {
+        setIsBulkDownloading(false);
+        if (downloadType === 'selected') {
+          setSelectedIds(new Set());
+        }
+      }
+      return;
+    }
+
+    // Use File System Access API to select folder
+    try {
+      const directoryHandle = await window.showDirectoryPicker({
+        mode: 'readwrite'
+      });
+      
+      const confirmMessage = `Download ${itemsToDownload.length} QR code${itemsToDownload.length > 1 ? 's' : ''} to the selected folder?`;
+      if (!window.confirm(confirmMessage)) {
+        return;
+      }
+
+      setIsBulkDownloading(true);
+      let successCount = 0;
+      let failCount = 0;
+
+      // Download all QR codes to the selected folder
+      for (let i = 0; i < itemsToDownload.length; i++) {
+        const item = itemsToDownload[i];
+        setDownloadingIds(prev => new Set(prev).add(item.videoId));
+        try {
+          await downloadQRToFile(item.videoId, item, directoryHandle);
+          successCount++;
+          console.log(`Downloaded QR code ${i + 1}/${itemsToDownload.length}: ${item.videoId}`);
+        } catch (err) {
+          failCount++;
+          console.error(`Failed to download QR code for ${item.videoId}:`, err);
+        } finally {
+          setDownloadingIds(prev => {
+            const next = new Set(prev);
+            next.delete(item.videoId);
+            return next;
+          });
+        }
+        
+        // Small delay between downloads
+        if (i < itemsToDownload.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+
+      setIsBulkDownloading(false);
+      
+      if (successCount > 0) {
+        alert(`Successfully downloaded ${successCount} QR code${successCount > 1 ? 's' : ''} to the selected folder${failCount > 0 ? ` (${failCount} failed)` : ''}`);
+      } else {
+        alert(`Failed to download QR codes. Please try again.`);
+      }
+      
+      // Clear selection after bulk download
+      if (downloadType === 'selected') {
+        setSelectedIds(new Set());
+      }
+    } catch (err) {
+      setIsBulkDownloading(false);
+      if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
+        // User cancelled or denied permission
+        console.log('Folder selection cancelled or permission denied');
+      } else {
+        console.error('Failed to select folder:', err);
+        alert('Failed to select folder. Please try again.');
+      }
+    }
+  };
+
+  // Get download button text based on current state
+  const getDownloadButtonText = () => {
+    if (isBulkDownloading) {
+      return 'Downloading...';
+    }
+    
+    if (selectedIds.size > 0) {
+      return `Download Selected (${selectedIds.size})`;
+    }
+    
+    const hasFilters = selectedFilters.subject !== 'all' || 
+                      selectedFilters.grade !== 'all' || 
+                      selectedFilters.lesson !== 'all' ||
+                      searchTerm.trim() !== '';
+    
+    if (hasFilters) {
+      return `Download Filtered (${filteredQrCodes.length})`;
+    }
+    
+    return `Download All (${qrCodes.length})`;
   };
 
   if (loading) {
@@ -295,7 +568,12 @@ function QRCodeStorage() {
 
         {/* Search and Filter */}
         <div className="bg-white rounded-2xl shadow-xl border-2 border-slate-200 p-6 sm:p-8 mb-6 lg:mb-8">
-          <div className="flex flex-col md:flex-row gap-4 lg:gap-6">
+          <div className="flex items-center gap-3 mb-6">
+            <Filter className="w-6 h-6 text-blue-600" />
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900">Filters</h2>
+          </div>
+
+          <div className="flex flex-col gap-4 mb-6">
             {/* Search */}
             <div className="flex-1 relative">
               <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5 z-10" />
@@ -308,23 +586,109 @@ function QRCodeStorage() {
               />
             </div>
 
-            {/* Filter */}
+            {/* Subject, Grade, Lesson Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Subject Filter */}
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Subject
+                </label>
+                <select
+                  value={selectedFilters.subject}
+                  onChange={(e) => setSelectedFilters(prev => ({ ...prev, subject: e.target.value }))}
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+                >
+                  <option value="all">All Subjects</option>
+                  {filterOptions.subjects
+                    .filter(s => s && s.trim() !== '')
+                    .map(subject => (
+                      <option key={subject} value={subject}>{subject}</option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Grade Filter */}
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Grade
+                </label>
+                <select
+                  value={selectedFilters.grade}
+                  onChange={(e) => setSelectedFilters(prev => ({ ...prev, grade: e.target.value }))}
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+                >
+                  <option value="all">All Grades</option>
+                  {filterOptions.grades
+                    .filter(g => g !== null && g !== undefined && String(g).trim() !== '')
+                    .sort((a, b) => Number(a) - Number(b))
+                    .map(grade => (
+                      <option key={grade} value={grade}>Grade {grade}</option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Lesson Filter */}
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Lesson
+                </label>
+                <select
+                  value={selectedFilters.lesson}
+                  onChange={(e) => setSelectedFilters(prev => ({ ...prev, lesson: e.target.value }))}
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+                >
+                  <option value="all">All Lessons</option>
+                  {filterOptions.lessons
+                    .filter(l => l !== null && l !== undefined && String(l).trim() !== '')
+                    .sort((a, b) => Number(a) - Number(b))
+                    .map(lesson => (
+                      <option key={lesson} value={lesson}>Lesson {lesson}</option>
+                    ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Bulk Download Actions */}
+          <div className="flex flex-wrap items-center gap-4 pt-4 border-t-2 border-slate-200">
+            {/* Selection Controls */}
             <div className="flex items-center gap-3">
-              <Filter className="text-slate-500 w-5 h-5" />
-              <select
-                value={selectedFilter}
-                onChange={(e) => setSelectedFilter(e.target.value)}
-                className="px-4 py-3.5 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all cursor-pointer text-[15px] font-medium"
+              <button
+                onClick={handleSelectAll}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold transition-colors"
               >
-                <option value="all">All Videos</option>
-                <option value="course">With Course</option>
-                <option value="grade">With Grade</option>
-                <option value="lesson">With Lesson</option>
-              </select>
+                {selectedIds.size === filteredQrCodes.length && filteredQrCodes.length > 0 ? (
+                  <CheckSquare className="w-5 h-5" />
+                ) : (
+                  <Square className="w-5 h-5" />
+                )}
+                <span>Select All ({selectedIds.size}/{filteredQrCodes.length})</span>
+              </button>
+            </div>
+
+            {/* Single Smart Download Button */}
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={handleSmartBulkDownload}
+                disabled={isBulkDownloading || (qrCodes.length === 0 && filteredQrCodes.length === 0)}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isBulkDownloading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    <span>Downloading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-5 h-5" />
+                    <span>{getDownloadButtonText()}</span>
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Count */}
-            <div className="flex items-center px-5 py-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border-2 border-blue-200 shadow-sm">
+            <div className="flex items-center px-5 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border-2 border-blue-200 shadow-sm ml-auto">
               <span className="text-sm font-bold text-blue-700">
                 {filteredQrCodes.length} {filteredQrCodes.length === 1 ? 'QR Code' : 'QR Codes'}
               </span>
@@ -360,6 +724,22 @@ function QRCodeStorage() {
                 key={item.videoId}
                 className="bg-white rounded-2xl shadow-lg border-2 border-slate-200 p-5 sm:p-6 hover:shadow-2xl transition-all duration-300 hover:border-blue-400 transform hover:-translate-y-1 group"
               >
+                {/* Selection Checkbox */}
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.videoId)}
+                      onChange={() => handleSelectItem(item.videoId)}
+                      className="w-5 h-5 text-blue-600 border-2 border-slate-300 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-slate-600">Select</span>
+                  </label>
+                  {downloadingIds.has(item.videoId) && (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  )}
+                </div>
+
                 {/* QR Code */}
                 <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4 rounded-xl mb-4 border-2 border-blue-200 flex justify-center shadow-inner group-hover:border-blue-300 transition-colors">
                   <div className="bg-white p-2 rounded-lg shadow-sm">
@@ -425,10 +805,20 @@ function QRCodeStorage() {
                 <div className="flex gap-2.5 pt-4 border-t-2 border-slate-200">
                   <button
                     onClick={() => handleDownloadQR(item.videoId, item)}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all font-bold text-sm shadow-lg hover:shadow-xl transform hover:scale-105"
+                    disabled={downloadingIds.has(item.videoId)}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all font-bold text-sm shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                   >
-                    <Download className="w-4 h-4" />
-                    <span className="hidden sm:inline">Download</span>
+                    {downloadingIds.has(item.videoId) ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        <span className="hidden sm:inline">Downloading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        <span className="hidden sm:inline">Download</span>
+                      </>
+                    )}
                   </button>
                   <a
                     href={item.shortUrl}

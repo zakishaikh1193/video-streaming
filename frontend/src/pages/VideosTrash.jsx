@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RotateCcw, Copy, Check, Search, Trash2, AlertCircle, Download, ExternalLink } from 'lucide-react';
+import { RotateCcw, Copy, Check, Search, Trash2, AlertCircle, Download, ExternalLink, CheckSquare, Square } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../services/api';
 
@@ -48,6 +48,8 @@ function VideosTrash() {
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState(null);
   const [restoringId, setRestoringId] = useState(null);
+  const [selectedVideos, setSelectedVideos] = useState(new Set());
+  const [deletingIds, setDeletingIds] = useState(new Set());
 
   useEffect(() => {
     loadDeletedVideos();
@@ -176,6 +178,189 @@ function VideosTrash() {
     }
   };
 
+  const handleSelectAll = () => {
+    if (selectedVideos.size === filteredVideos.length) {
+      setSelectedVideos(new Set());
+    } else {
+      setSelectedVideos(new Set(filteredVideos.map(v => v.id)));
+    }
+  };
+
+  const handleSelectVideo = (id) => {
+    const newSelected = new Set(selectedVideos);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedVideos(newSelected);
+  };
+
+  const handlePermanentDelete = async (id) => {
+    if (!window.confirm(`Are you sure you want to PERMANENTLY delete this video? This action cannot be undone!`)) {
+      return;
+    }
+
+    try {
+      setDeletingIds(prev => new Set(prev).add(id));
+      console.log(`[VideosTrash] Attempting to permanently delete video ID: ${id}`);
+      
+      const response = await api.delete(`/videos/${id}/permanent`);
+      console.log(`[VideosTrash] Delete response:`, response.data);
+      
+      // Check for success in response
+      if (response.data && (response.data.success === true || response.status === 200)) {
+        // Remove from list
+        setDeletedVideos(prev => prev.filter(v => v.id !== id));
+        setFilteredVideos(prev => prev.filter(v => v.id !== id));
+        setSelectedVideos(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(id);
+          return newSet;
+        });
+        alert('Video permanently deleted successfully!');
+      } else {
+        const errorMsg = response.data?.error || response.data?.message || 'Unknown error';
+        console.error(`[VideosTrash] Delete failed:`, errorMsg);
+        throw new Error(errorMsg);
+      }
+    } catch (err) {
+      console.error('[VideosTrash] Failed to permanently delete video:', err);
+      console.error('[VideosTrash] Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        url: err.config?.url
+      });
+      
+      let errorMessage = 'Failed to permanently delete video';
+      if (err.response?.data?.error) {
+        errorMessage = err.response.data.error;
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      if (err.response?.status === 404) {
+        errorMessage = 'Video not found or already deleted';
+      } else if (err.response?.status === 401) {
+        errorMessage = 'Authentication required. Please log in again.';
+      } else if (err.response?.status === 403) {
+        errorMessage = 'You do not have permission to delete videos.';
+      } else if (err.response?.status >= 500) {
+        errorMessage = `Server error: ${errorMessage}`;
+      }
+      
+      alert(`Failed to permanently delete video: ${errorMessage}`);
+    } finally {
+      setDeletingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+    }
+  };
+
+  const handleBulkPermanentDelete = async () => {
+    if (selectedVideos.size === 0) {
+      alert('Please select at least one video to delete.');
+      return;
+    }
+
+    const count = selectedVideos.size;
+    if (!window.confirm(`Are you sure you want to PERMANENTLY delete ${count} video(s)? This action cannot be undone!`)) {
+      return;
+    }
+
+    try {
+      const ids = Array.from(selectedVideos);
+      setDeletingIds(new Set(ids));
+      
+      const response = await api.post('/videos/permanent-delete', { ids });
+      
+      if (response.data && (response.data.success || response.status === 200)) {
+        // Remove deleted videos from list
+        const deletedIds = new Set(ids);
+        setDeletedVideos(prev => prev.filter(v => !deletedIds.has(v.id)));
+        setFilteredVideos(prev => prev.filter(v => !deletedIds.has(v.id)));
+        setSelectedVideos(new Set());
+        
+        const deletedCount = response.data.deleted || count;
+        alert(`Successfully deleted ${deletedCount} out of ${count} video(s)!`);
+        
+        if (response.data.errors && response.data.errors.length > 0) {
+          console.warn('Some videos could not be deleted:', response.data.errors);
+          alert(`Warning: ${response.data.errors.length} video(s) could not be deleted. Check console for details.`);
+        }
+      } else {
+        throw new Error(response.data?.error || response.data?.message || 'Failed to delete videos');
+      }
+    } catch (err) {
+      console.error('Failed to permanently delete videos:', err);
+      console.error('Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status
+      });
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to permanently delete videos';
+      alert(`Failed to permanently delete videos: ${errorMessage}`);
+    } finally {
+      setDeletingIds(new Set());
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (filteredVideos.length === 0) {
+      alert('No videos to delete.');
+      return;
+    }
+
+    const count = filteredVideos.length;
+    if (!window.confirm(`Are you sure you want to PERMANENTLY delete ALL ${count} video(s) in trash? This action cannot be undone!`)) {
+      return;
+    }
+
+    try {
+      // Select all videos
+      const allIds = filteredVideos.map(v => v.id);
+      setDeletingIds(new Set(allIds));
+      setSelectedVideos(new Set(allIds));
+      
+      const response = await api.post('/videos/permanent-delete', { ids: allIds });
+      
+      if (response.data && (response.data.success || response.status === 200)) {
+        // Clear all videos from list
+        setDeletedVideos([]);
+        setFilteredVideos([]);
+        setSelectedVideos(new Set());
+        
+        const deletedCount = response.data.deleted || count;
+        alert(`Successfully deleted ${deletedCount} out of ${count} video(s)!`);
+        
+        if (response.data.errors && response.data.errors.length > 0) {
+          console.warn('Some videos could not be deleted:', response.data.errors);
+          alert(`Warning: ${response.data.errors.length} video(s) could not be deleted. Check console for details.`);
+        }
+      } else {
+        throw new Error(response.data?.error || response.data?.message || 'Failed to delete all videos');
+      }
+    } catch (err) {
+      console.error('Failed to permanently delete all videos:', err);
+      console.error('Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status
+      });
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to permanently delete all videos';
+      alert(`Failed to permanently delete all videos: ${errorMessage}`);
+    } finally {
+      setDeletingIds(new Set());
+      setSelectedVideos(new Set());
+    }
+  };
+
   const handleDownloadQR = async (videoId, videoData) => {
     try {
       if (!videoId) {
@@ -291,6 +476,68 @@ function VideosTrash() {
           </div>
         </div>
 
+        {/* Selection Controls */}
+        {filteredVideos.length > 0 && (
+          <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-xl border-2 border-red-200">
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={handleSelectAll}
+                className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg border-2 border-red-300 hover:bg-red-50 transition-all font-semibold text-sm"
+              >
+                {selectedVideos.size === filteredVideos.length ? (
+                  <CheckSquare className="w-5 h-5 text-red-600" />
+                ) : (
+                  <Square className="w-5 h-5 text-red-600" />
+                )}
+                <span className="text-red-700">
+                  {selectedVideos.size === filteredVideos.length ? 'Deselect All' : 'Select All'}
+                </span>
+              </button>
+              <span className="text-sm font-bold text-red-700">
+                {selectedVideos.size} of {filteredVideos.length} selected
+              </span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {selectedVideos.size > 0 && (
+                <button
+                  onClick={handleBulkPermanentDelete}
+                  disabled={deletingIds.size > 0}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 transition-all font-bold text-sm shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {deletingIds.size > 0 ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-5 h-5" />
+                      <span>Delete Selected ({selectedVideos.size})</span>
+                    </>
+                  )}
+                </button>
+              )}
+              <button
+                onClick={handleDeleteAll}
+                disabled={deletingIds.size > 0 || filteredVideos.length === 0}
+                className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-red-700 to-red-800 text-white rounded-xl hover:from-red-800 hover:to-red-900 transition-all font-bold text-sm shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-red-900"
+              >
+                {deletingIds.size > 0 ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Deleting All...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-5 h-5" />
+                    <span>Delete All ({filteredVideos.length})</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Videos Container */}
         <div className="bg-white rounded-2xl shadow-xl border-2 border-slate-200 p-6 sm:p-8">
           {filteredVideos.length === 0 ? (
@@ -314,10 +561,28 @@ function VideosTrash() {
               {filteredVideos.map((video) => (
                 <div
                   key={video.id}
-                  className="bg-white rounded-xl shadow-lg border-2 border-slate-200 p-5 sm:p-6 hover:shadow-2xl transition-all duration-300 hover:border-red-400"
+                  className={`bg-white rounded-xl shadow-lg border-2 p-5 sm:p-6 hover:shadow-2xl transition-all duration-300 ${
+                    selectedVideos.has(video.id) 
+                      ? 'border-red-500 bg-red-50' 
+                      : 'border-slate-200 hover:border-red-400'
+                  }`}
                 >
                   {/* Horizontal Container */}
                   <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center">
+                    {/* Checkbox */}
+                    <div className="flex-shrink-0">
+                      <button
+                        onClick={() => handleSelectVideo(video.id)}
+                        className="p-2 hover:bg-red-100 rounded-lg transition-all"
+                        title={selectedVideos.has(video.id) ? 'Deselect' : 'Select'}
+                      >
+                        {selectedVideos.has(video.id) ? (
+                          <CheckSquare className="w-6 h-6 text-red-600" />
+                        ) : (
+                          <Square className="w-6 h-6 text-slate-400 hover:text-red-600" />
+                        )}
+                      </button>
+                    </div>
                     {/* QR Code Section */}
                     <div className="flex-shrink-0">
                       <div className="bg-gradient-to-br from-red-50 via-orange-50 to-red-50 p-4 rounded-xl border-2 border-red-200 flex justify-center shadow-inner">
@@ -428,6 +693,23 @@ function VideosTrash() {
                         <ExternalLink className="w-4 h-4" />
                         <span>View</span>
                       </a>
+                      <button
+                        onClick={() => handlePermanentDelete(video.id)}
+                        disabled={deletingIds.has(video.id)}
+                        className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 transition-all font-bold text-sm shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {deletingIds.has(video.id) ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                            <span>Deleting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="w-4 h-4" />
+                            <span>Delete</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>

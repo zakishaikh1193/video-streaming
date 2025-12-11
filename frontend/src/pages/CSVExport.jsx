@@ -6,11 +6,13 @@ function CSVExport() {
   const [filterValues, setFilterValues] = useState({
     subjects: [],
     grades: [],
+    units: [],
     lessons: []
   });
   const [selectedFilters, setSelectedFilters] = useState({
     subject: 'all',
     grade: 'all',
+    unit: 'all',
     lesson: 'all'
   });
   const [loading, setLoading] = useState(true);
@@ -38,6 +40,7 @@ function CSVExport() {
         setFilterValues({
           subjects: response.data.subjects || [],
           grades: response.data.grades || [],
+          units: response.data.units || [],
           lessons: response.data.lessons || []
         });
       }
@@ -57,6 +60,9 @@ function CSVExport() {
       }
       if (selectedFilters.grade !== 'all') {
         filters.grade = selectedFilters.grade;
+      }
+      if (selectedFilters.unit !== 'all') {
+        filters.unit = selectedFilters.unit;
       }
       if (selectedFilters.lesson !== 'all') {
         filters.lesson = selectedFilters.lesson;
@@ -83,6 +89,9 @@ function CSVExport() {
       if (selectedFilters.grade !== 'all') {
         params.grade = selectedFilters.grade;
       }
+      if (selectedFilters.unit !== 'all') {
+        params.unit = selectedFilters.unit;
+      }
       if (selectedFilters.lesson !== 'all') {
         params.lesson = selectedFilters.lesson;
       }
@@ -105,6 +114,9 @@ function CSVExport() {
       }
       if (selectedFilters.grade !== 'all') {
         filename += `_grade_${selectedFilters.grade}`;
+      }
+      if (selectedFilters.unit !== 'all') {
+        filename += `_unit_${selectedFilters.unit}`;
       }
       if (selectedFilters.lesson !== 'all') {
         filename += `_lesson_${selectedFilters.lesson}`;
@@ -136,6 +148,7 @@ function CSVExport() {
     setSelectedFilters({
       subject: 'all',
       grade: 'all',
+      unit: 'all',
       lesson: 'all'
     });
   };
@@ -162,7 +175,7 @@ function CSVExport() {
             </div>
             <div>
               <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">CSV Export</h1>
-              <p className="text-slate-600 text-base sm:text-lg">Export videos to CSV with filters by Subject, Grade, and Lesson</p>
+              <p className="text-slate-600 text-base sm:text-lg">Export videos to CSV with filters by Subject, Grade, Unit, and Lesson</p>
             </div>
           </div>
         </div>
@@ -183,7 +196,7 @@ function CSVExport() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
             {/* Subject Filter */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -227,6 +240,32 @@ function CSVExport() {
                   .map((grade) => (
                     <option key={grade} value={grade}>
                       Grade {grade}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {/* Unit Filter */}
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">
+                Unit
+              </label>
+              <select
+                value={selectedFilters.unit}
+                onChange={(e) => handleFilterChange('unit', e.target.value)}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+              >
+                <option value="all">All Units</option>
+                {filterValues.units
+                  .filter(u => u !== null && u !== undefined && String(u).trim() !== '')
+                  .sort((a, b) => {
+                    const numA = parseInt(a) || 0;
+                    const numB = parseInt(b) || 0;
+                    return numA - numB;
+                  })
+                  .map((unit) => (
+                    <option key={unit} value={unit}>
+                      Unit {unit}
                     </option>
                   ))}
               </select>

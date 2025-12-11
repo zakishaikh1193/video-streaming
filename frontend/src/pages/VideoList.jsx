@@ -76,7 +76,8 @@ function VideoList() {
     grades: [],
     units: [],
     lessons: [],
-    modules: []
+    modules: [],
+    versions: []
   });
   const [filters, setFilters] = useState({
     search: '',
@@ -87,6 +88,7 @@ function VideoList() {
     lesson: '',
     module: '',
     moduleNumber: '',
+    version: '',
     status: isInactiveRoute ? 'inactive' : 'active'
   });
   const [diagnosticData, setDiagnosticData] = useState(null);
@@ -144,6 +146,7 @@ function VideoList() {
     filters.lesson,
     filters.module,
     filters.moduleNumber,
+    filters.version,
     filters.status
   ]);
 
@@ -169,6 +172,7 @@ function VideoList() {
       if (filters.lesson && filters.lesson.toString().trim()) params.append('lesson', filters.lesson.toString().trim());
       if (filters.module && filters.module.toString().trim()) params.append('module', filters.module.toString().trim());
       if (filters.moduleNumber && filters.moduleNumber.toString().trim()) params.append('moduleNumber', filters.moduleNumber.toString().trim());
+      if (filters.version && filters.version.toString().trim()) params.append('version', filters.version.toString().trim());
       if (filters.status && filters.status.trim()) params.append('status', filters.status.trim());
 
       console.log('[VideoList] Fetching videos with filters:', Object.fromEntries(params));
@@ -449,7 +453,7 @@ function VideoList() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
               Subject
@@ -550,6 +554,26 @@ function VideoList() {
               ))}
             </select>
           </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Version
+            </label>
+            <select
+              value={filters.version || ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFilters(prev => ({ ...prev, version: value }));
+              }}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
+            >
+              <option value="">All Versions</option>
+              {filterOptions.versions && filterOptions.versions.map((version) => (
+                <option key={version} value={version}>
+                  {version}
+                </option>
+              ))}
+            </select>
+          </div>
           {!isInactiveRoute && (
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -571,7 +595,7 @@ function VideoList() {
           )}
         </div>
         {/* Clear Filters Button */}
-        {(filters.search || filters.subject || filters.course || filters.grade || filters.unit || filters.lesson || filters.module || filters.moduleNumber || filters.status !== 'active') && (
+        {(filters.search || filters.subject || filters.course || filters.grade || filters.unit || filters.lesson || filters.module || filters.moduleNumber || filters.version || filters.status !== 'active') && (
           <div className="mt-6">
             <button
               onClick={() => setFilters({
@@ -583,7 +607,8 @@ function VideoList() {
                 lesson: '',
                 module: '',
                 moduleNumber: '',
-                status: 'active'
+                version: '',
+                status: isInactiveRoute ? 'inactive' : 'active'
               })}
               className="px-4 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
             >

@@ -1,525 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Play, Edit, Trash2, ExternalLink, Eye, Calendar, Search, MessageCircle, Bug, X, AlertCircle, CheckCircle, Info, Grid3x3, List } from 'lucide-react';
-import api from '../services/api';
-import { getBackendBaseUrl } from '../utils/apiConfig';
 
-// Video Preview Component for Hover
-function VideoPreview({ videoId, isHovered }) {
-  const videoRef = useRef(null);
-  const timeUpdateHandlerRef = useRef(null);
-  
-  useEffect(() => {
-    const videoEl = videoRef.current;
-    if (!videoEl) return;
-    
-    if (isHovered) {
-      // Start playing when hovered
-      videoEl.currentTime = 0;
-      videoEl.play().catch(err => {
-        console.log('Auto-play prevented:', err);
-      });
-      
-      // Loop the first 10 seconds
-      timeUpdateHandlerRef.current = () => {
-        if (videoEl.currentTime >= 10) {
-          videoEl.currentTime = 0;
-          videoEl.play().catch(() => {});
-        }
-      };
-      videoEl.addEventListener('timeupdate', timeUpdateHandlerRef.current);
-    } else {
-      // Stop and reset when not hovered
-      videoEl.pause();
-      videoEl.currentTime = 0;
-      if (timeUpdateHandlerRef.current) {
-        videoEl.removeEventListener('timeupdate', timeUpdateHandlerRef.current);
-        timeUpdateHandlerRef.current = null;
-      }
-    }
-    
-    return () => {
-      if (videoEl && timeUpdateHandlerRef.current) {
-        videoEl.removeEventListener('timeupdate', timeUpdateHandlerRef.current);
-      }
-    };
-  }, [isHovered]);
-  
-  if (!isHovered) return null;
-  
-  return (
-    <div className="absolute inset-4 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-black z-20">
-      <video
-        ref={videoRef}
-        src={`${getBackendBaseUrl()}/api/videos/${videoId}/stream`}
-        className="w-full h-full object-cover"
-        muted
-        playsInline
-        onError={(e) => {
-          console.error('Video preview error:', e);
-        }}
-      />
-    </div>
-  );
-}
-
-function VideoList() {
-  const location = useLocation();
-  const isInactiveRoute = location.pathname === '/admin/videos/inactive';
-  
-  const [videos, setVideos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('card'); // 'card' or 'list'
-  const [filterOptions, setFilterOptions] = useState({
-    subjects: [],
-    courses: [], // Keep for backward compatibility
-    grades: [],
-    units: [],
-    lessons: [],
-    modules: []
-  });
-  const [filters, setFilters] = useState({
-    search: '',
-    subject: '',
-    course: '', // Keep for backward compatibility
-    grade: '',
-    unit: '',
-    lesson: '',
-    module: '',
-    moduleNumber: '',
-    status: isInactiveRoute ? 'inactive' : 'active'
-  });
-  const [diagnosticData, setDiagnosticData] = useState(null);
-  const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
-  const [diagnosticLoading, setDiagnosticLoading] = useState(false);
-  const [hoveredVideoId, setHoveredVideoId] = useState(null);
-  const [selectedIds, setSelectedIds] = useState(new Set());
-
-  // Derive initials and a consistent gradient from the title for thumbnail fallbacks
-  const getTitleInitials = (title) => {
-    if (!title) return 'NA';
-    const parts = title.trim().split(/\s+/).filter(Boolean);
-    const first = parts[0]?.[0] || '';
-    const second = parts[1]?.[0] || '';
-    return (first + second).toUpperCase() || 'NA';
-  };
-
-  const getTitleGradient = (title) => {
-    const safe = title || 'video';
-    let hash = 0;
-    for (let i = 0; i < safe.length; i += 1) {
-      hash = safe.charCodeAt(i) + ((hash << 5) - hash);
-      hash &= hash; // keep 32bit
-    }
-    const hue1 = Math.abs(hash) % 360;
-    const hue2 = (hue1 + 50) % 360;
-    return `linear-gradient(135deg, hsl(${hue1}, 70%, 80%), hsl(${hue2}, 70%, 70%))`;
-  };
-
-  useEffect(() => {
-    fetchFilterOptions();
-    fetchVideos();
-  }, []);
-
-  // Update status filter when route changes
-  useEffect(() => {
-    if (isInactiveRoute && filters.status !== 'inactive') {
-      setFilters(prev => ({ ...prev, status: 'inactive' }));
-    } else if (!isInactiveRoute && filters.status === 'inactive') {
-      setFilters(prev => ({ ...prev, status: 'active' }));
-    }
-  }, [isInactiveRoute]);
-
-  useEffect(() => {
-    // Reset loading state when filters change
-    setLoading(true);
-    fetchVideos();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    filters.search,
-    filters.subject,
-    filters.course,
-    filters.grade,
-    filters.unit,
-    filters.lesson,
-    filters.module,
-    filters.moduleNumber,
-    filters.status
-  ]);
-
-  const fetchFilterOptions = async () => {
-    try {
-      const response = await api.get('/videos/filters');
-      setFilterOptions(response.data);
-    } catch (error) {
-      console.error('Failed to fetch filter options:', error);
-    }
-  };
-
-  const fetchVideos = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (filters.search && filters.search.trim()) params.append('search', filters.search.trim());
-      if (filters.subject && filters.subject.trim()) params.append('subject', filters.subject.trim());
-      // Backward compatibility: send course separately (backend maps course -> subject)
-      if (filters.course && filters.course.trim()) params.append('course', filters.course.trim());
-      if (filters.grade && filters.grade.toString().trim()) params.append('grade', filters.grade.toString().trim());
-      if (filters.unit && filters.unit.toString().trim()) params.append('unit', filters.unit.toString().trim());
-      if (filters.lesson && filters.lesson.toString().trim()) params.append('lesson', filters.lesson.toString().trim());
-      if (filters.module && filters.module.toString().trim()) params.append('module', filters.module.toString().trim());
-      if (filters.moduleNumber && filters.moduleNumber.toString().trim()) params.append('moduleNumber', filters.moduleNumber.toString().trim());
-      if (filters.status && filters.status.trim()) params.append('status', filters.status.trim());
-
-      console.log('[VideoList] Fetching videos with filters:', Object.fromEntries(params));
-      const response = await api.get(`/videos?${params.toString()}`);
-      const videosData = response.data || [];
-      
-      // Log to verify subject information is being fetched from database - show all fields including nulls
-      if (videosData.length > 0) {
-        console.log('[VideoList] Fetched videos from database:', videosData.length);
-        const sampleVideo = videosData[0];
-        console.log('[VideoList] Sample video with ALL subject info (including nulls):', {
-          id: sampleVideo.id,
-          video_id: sampleVideo.video_id,
-          title: sampleVideo.title,
-          subject: sampleVideo.subject,
-          course: sampleVideo.course, // Backward compatibility
-          grade: sampleVideo.grade,
-          unit: sampleVideo.unit,
-          lesson: sampleVideo.lesson,
-          module: sampleVideo.module,
-          description: sampleVideo.description,
-          status: sampleVideo.status,
-          // Show types to verify data
-          subjectType: typeof sampleVideo.subject,
-          courseType: typeof sampleVideo.course,
-          gradeType: typeof sampleVideo.grade,
-          unitType: typeof sampleVideo.unit,
-          lessonType: typeof sampleVideo.lesson,
-          moduleType: typeof sampleVideo.module,
-          // Show all available keys
-          allKeys: Object.keys(sampleVideo),
-          // Show raw values for debugging
-          rawSubject: sampleVideo.subject,
-          rawCourse: sampleVideo.course,
-          rawGrade: sampleVideo.grade,
-          rawUnit: sampleVideo.unit,
-          rawLesson: sampleVideo.lesson,
-          rawModule: sampleVideo.module
-        });
-      }
-      
-      setVideos(videosData);
-      console.log('[VideoList] Successfully fetched', videosData.length, 'videos');
-    } catch (error) {
-      console.error('[VideoList] Failed to fetch videos:', error);
-      console.error('[VideoList] Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
-      setVideos([]); // Set empty array on error
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (!confirm('Are you sure you want to delete this video?')) return;
-
-    try {
-      await api.delete(`/videos/${id}`);
-      fetchVideos();
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    } catch (error) {
-      alert('Failed to delete video');
-    }
-  };
-
-  const handleActivate = async (id) => {
-    if (!confirm('Are you sure you want to activate this video? It will appear in the video library.')) return;
-
-    try {
-      await api.put(`/videos/${id}`, { status: 'active' });
-      fetchVideos();
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    } catch (error) {
-      alert('Failed to activate video');
-      console.error('Activate error:', error);
-    }
-  };
-
-  const truncateDescription = (text, maxWords = 10) => {
-    if (!text || !text.trim()) return 'No description';
-    const words = text.trim().split(/\s+/);
-    if (words.length <= maxWords) return text;
-    return words.slice(0, maxWords).join(' ') + '...';
-  };
-
-  const handleToggleSelect = (id) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const handleSelectAll = () => {
-    if (selectedIds.size === videos.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(videos.map((v) => v.id)));
-    }
-  };
-
-  const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) {
-      alert('Please select at least one video to delete.');
-      return;
-    }
-    if (!confirm(`Delete ${selectedIds.size} selected video(s)? This cannot be undone.`)) return;
-    const ids = Array.from(selectedIds);
-    try {
-      await Promise.all(ids.map((id) => api.delete(`/videos/${id}`).catch((err) => ({ err, id }))));
-      setSelectedIds(new Set());
-      fetchVideos();
-    } catch (error) {
-      alert('Some videos could not be deleted. Check console for details.');
-      console.error('Bulk delete error:', error);
-    }
-  };
-
-  const handleBulkActivate = async () => {
-    if (selectedIds.size === 0) {
-      alert('Please select at least one video to activate.');
-      return;
-    }
-    if (!confirm(`Activate ${selectedIds.size} selected video(s)? They will appear in the video library.`)) return;
-    const ids = Array.from(selectedIds);
-    try {
-      await Promise.all(ids.map((id) => api.put(`/videos/${id}`, { status: 'active' }).catch((err) => ({ err, id }))));
-      setSelectedIds(new Set());
-      fetchVideos();
-    } catch (error) {
-      alert('Some videos could not be activated. Check console for details.');
-      console.error('Bulk activate error:', error);
-    }
-  };
-
-  const handleDiagnostic = async (video) => {
-    setDiagnosticLoading(true);
-    setShowDiagnosticModal(true);
-    setDiagnosticData(null);
-
-    try {
-      // Try using database ID first, then video_id
-      const videoId = video.id || video.video_id;
-      const response = await api.get(`/videos/diagnostic/${videoId}`);
-      setDiagnosticData(response.data);
-    } catch (error) {
-      console.error('Diagnostic error:', error);
-      setDiagnosticData({
-        error: true,
-        message: error.response?.data?.message || error.message || 'Failed to fetch diagnostic information'
-      });
-    } finally {
-      setDiagnosticLoading(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-slate-600">Loading videos...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      <div className="p-6 lg:p-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900 mb-2">
-                {isInactiveRoute ? 'Inactive Videos' : 'Video Library'}
-              </h1>
-              <p className="text-slate-600 text-lg">
-                {isInactiveRoute ? 'View and manage all inactive videos' : 'Manage and view all your videos'}
-              </p>
-            </div>
-            {/* View Toggle */}
-            <div className="flex items-center gap-2 bg-white rounded-xl p-1 shadow-md border border-slate-200">
-              <button
-                onClick={() => setViewMode('card')}
-                className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 ${
-                  viewMode === 'card'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Card View"
-              >
-                <Grid3x3 className="w-4 h-4" />
-                <span className="hidden sm:inline">Card</span>
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 ${
-                  viewMode === 'list'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="List View"
-              >
-                <List className="w-4 h-4" />
-                <span className="hidden sm:inline">List</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Filters Section */}
-        <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-6">
-        <h2 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-          <Search className="w-5 h-5 text-slate-600" />
-          Filters
-        </h2>
-        {/* Bulk actions */}
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          <button
-            onClick={handleSelectAll}
-            className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors text-sm font-semibold"
-          >
-            {selectedIds.size === videos.length ? 'Deselect All' : 'Select All'}
-          </button>
-          {isInactiveRoute ? (
-            <button
-              onClick={handleBulkActivate}
-              disabled={selectedIds.size === 0}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg border border-green-700 hover:bg-green-700 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              <CheckCircle className="w-4 h-4" />
-              Activate Selected ({selectedIds.size})
-            </button>
-          ) : (
-            <button
-              onClick={handleBulkDelete}
-              disabled={selectedIds.size === 0}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg border border-red-700 hover:bg-red-700 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Delete Selected ({selectedIds.size})
-            </button>
-          )}
-        </div>
-        
-        {/* Search Bar */}
-        <div className="mb-6">
-          <label className="block text-sm font-semibold text-slate-700 mb-2">
-            Search
-          </label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
-            <input
-              type="text"
-              value={filters.search || ''}
-              onChange={(e) => {
-                const value = e.target.value;
-                setFilters(prev => ({ ...prev, search: value }));
-              }}
-              placeholder="Search by title, description, or video ID..."
-              className="w-full pl-10 pr-3 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Subject
-            </label>
-            <select
-              value={filters.subject || filters.course || ''}
-              onChange={(e) => {
-                const value = e.target.value;
-                setFilters(prev => ({ ...prev, subject: value, course: value }));
-              }}
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
-            >
-              <option value="">All Subjects</option>
-              {(filterOptions.subjects || filterOptions.courses || []).map((subject) => (
-                <option key={subject} value={subject}>
-                  {subject}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Grade
-            </label>
-            <select
-              value={filters.grade || ''}
-              onChange={(e) => {
-                const value = e.target.value;
-                setFilters(prev => ({ ...prev, grade: value }));
-              }}
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
-            >
-              <option value="">All Grades</option>
-              {filterOptions.grades && filterOptions.grades.map((grade) => (
-                <option key={grade} value={grade}>
-                  {grade}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Unit
-            </label>
-            <select
-              value={filters.unit || ''}
-              onChange={(e) => {
-                const value = e.target.value;
-                setFilters(prev => ({ ...prev, unit: value }));
-              }}
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
-            >
-              <option value="">All Units</option>
-              {filterOptions.units && filterOptions.units.map((unit) => (
-                <option key={unit} value={unit}>
-                  {unit}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Lesson
-            </label>
-            <select
-              value={filters.lesson || ''}
-              onChange={(e) => {
-                const value = e.target.value;
-                setFilters(prev => ({ ...prev, lesson: value }));
-              }}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Lessons</option>
@@ -905,74 +387,58 @@ function VideoList() {
                   }}
                   onMouseLeave={() => {
                     setHoveredVideoId(null);
-                    // Stop video when mouse leaves
-                    const videoElement = videoPreviewRefs[video.video_id];
-                    if (videoElement) {
-                      videoElement.pause();
-                      videoElement.currentTime = 0;
-                    }
                   }}
                 >
-                  {thumbnailUrl ? (
-                    <div className="relative w-full h-full rounded-lg overflow-hidden border border-white shadow-md bg-white">
+                  {/* Video Frame Thumbnail - Extract frame from video and show as image */}
+                  <VideoFrameThumbnail videoId={video.video_id} />
+
+                  {/* Thumbnail Image - Show if available, overlay on top of video preview */}
+                  {thumbnailUrl && (
+                    <div className="relative w-full h-full rounded-lg overflow-hidden border border-white shadow-md z-10">
                       <img
                         src={thumbnailUrl}
                         alt={video.title}
                         className={`w-full h-full object-cover transition-opacity duration-300 ${
-                          hoveredVideoId === video.video_id ? 'opacity-0' : 'opacity-100'
+                          hoveredVideoId === video.video_id ? 'opacity-30' : 'opacity-100'
                         }`}
                         onError={(e) => {
-                        // Try alternative extensions if first one fails
-                        const currentSrc = e.target.src;
-                        const videoId = video.video_id;
-                        const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
-                        const currentExt = extensions.find(ext => currentSrc.includes(ext)) || extensions[0];
-                        const currentIndex = extensions.indexOf(currentExt);
-                        
-                        if (currentIndex < extensions.length - 1) {
-                          // Try next extension
-                          const nextExt = extensions[currentIndex + 1];
-                          e.target.src = `${backendUrl}/thumbnails/${videoId}${nextExt}`;
-                        } else {
-                          // All extensions failed, show placeholder
-                          e.target.style.display = 'none';
-                          const placeholder = e.target.parentElement.querySelector('.thumbnail-placeholder');
-                          if (placeholder) {
-                            placeholder.classList.remove('hidden');
-                            placeholder.classList.add('flex');
+                          // Try alternative extensions if first one fails
+                          const currentSrc = e.target.src;
+                          const videoId = video.video_id;
+                          const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+                          const currentExt = extensions.find(ext => currentSrc.includes(ext)) || extensions[0];
+                          const currentIndex = extensions.indexOf(currentExt);
+                          
+                          if (currentIndex < extensions.length - 1) {
+                            // Try next extension
+                            const nextExt = extensions[currentIndex + 1];
+                            e.target.src = `${backendUrl}/thumbnails/${videoId}${nextExt}`;
+                          } else {
+                            // All extensions failed, hide image and let video preview show
+                            e.target.style.display = 'none';
                           }
-                        }
-                      }}
-                      onLoad={() => {
-                        // Hide placeholder when image loads successfully
-                        const placeholder = e.target.parentElement?.parentElement?.querySelector('.thumbnail-placeholder');
-                        if (placeholder) {
-                          placeholder.classList.add('hidden');
-                          placeholder.classList.remove('flex');
-                        }
-                      }}
+                        }}
                       />
                     </div>
-                  ) : null}
-                  
-                  {/* Video Preview on Hover */}
-                  <VideoPreview 
-                    videoId={video.video_id} 
-                    isHovered={hoveredVideoId === video.video_id} 
-                  />
-                  
-                  {/* Placeholder with title-based gradient/initials */}
+                  )}
+
+                  {/* Default Placeholder - Only show if video frame extraction fails */}
                   <div
-                    className={`thumbnail-placeholder absolute inset-2 flex flex-col items-center justify-center rounded-xl border-2 border-slate-300 shadow-inner ${
-                      thumbnailUrl && hoveredVideoId !== video.video_id ? 'hidden' : 'flex'
-                    }`}
-                    style={{ background: getTitleGradient(video.title) }}
+                    className="thumbnail-placeholder absolute inset-2 flex flex-col items-center justify-center rounded-xl border-2 border-slate-300 shadow-inner z-5 pointer-events-none"
+                    style={{ background: getTitleGradient(video.title), display: 'none' }}
+                    id={`placeholder-${video.video_id}`}
                   >
                     <div className="w-16 h-16 bg-white/70 rounded-full flex items-center justify-center mb-2 shadow-md">
                       <span className="text-xl font-bold text-slate-800">{getTitleInitials(video.title)}</span>
                     </div>
-                    <p className="text-xs text-slate-700 font-semibold">No Thumbnail</p>
+                    <p className="text-xs text-slate-700 font-semibold">No Preview</p>
                   </div>
+                  
+                  {/* Video Preview on Hover - Overlay on top */}
+                  <VideoPreview 
+                    videoId={video.video_id} 
+                    isHovered={hoveredVideoId === video.video_id} 
+                  />
 
                   {/* Play Button Overlay (only on hover, but not when video preview is showing) */}
                   {hoveredVideoId !== video.video_id && (

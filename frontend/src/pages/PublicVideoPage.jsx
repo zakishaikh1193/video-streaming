@@ -455,22 +455,7 @@ function PublicVideoPage() {
                     Streaming URL
                   </h3>
                   <div className="flex gap-2">
-                    <button
-                      onClick={handleDownloadPDF}
-                      className="px-3 py-2 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 font-medium text-xs shadow-sm transition-colors flex items-center gap-1"
-                      title="Download PDF"
-                    >
-                      <Download className="w-4 h-4" />
-                      PDF
-                    </button>
-                    <button
-                      onClick={handlePrint}
-                      className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-xl hover:bg-indigo-200 font-medium text-xs shadow-sm transition-colors flex items-center gap-1"
-                      title="Print"
-                    >
-                      <Printer className="w-4 h-4" />
-                      Print
-                    </button>
+                    
                   </div>
                 </div>
                 <div className="space-y-4">

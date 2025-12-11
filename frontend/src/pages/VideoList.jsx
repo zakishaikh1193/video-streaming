@@ -129,7 +129,8 @@ function VideoList() {
       const params = new URLSearchParams();
       if (filters.search && filters.search.trim()) params.append('search', filters.search.trim());
       if (filters.subject && filters.subject.trim()) params.append('subject', filters.subject.trim());
-      if (filters.course && filters.course.trim()) params.append('subject', filters.course.trim()); // Backward compatibility - map course to subject
+      // Backward compatibility: send course separately (backend maps course -> subject)
+      if (filters.course && filters.course.trim()) params.append('course', filters.course.trim());
       if (filters.grade && filters.grade.toString().trim()) params.append('grade', filters.grade.toString().trim());
       if (filters.unit && filters.unit.toString().trim()) params.append('unit', filters.unit.toString().trim());
       if (filters.lesson && filters.lesson.toString().trim()) params.append('lesson', filters.lesson.toString().trim());

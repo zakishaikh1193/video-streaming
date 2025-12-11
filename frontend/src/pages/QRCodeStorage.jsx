@@ -1,7 +1,45 @@
 import { useEffect, useState } from 'react';
-import { Download, Copy, Check, Search, Filter } from 'lucide-react';
+import { Download, Copy, Check, Search, Filter, AlertCircle, Settings } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../services/api';
+import QRCodeDiagnostic from '../components/QRCodeDiagnostic';
+
+// Safe QR Code component wrapper
+function SafeQRCode({ value, size = 160 }) {
+  const [hasError, setHasError] = useState(false);
+  
+  if (hasError || !value) {
+    return (
+      <div className="w-40 h-40 flex items-center justify-center text-red-500 text-xs text-center p-4">
+        <div>
+          <AlertCircle className="w-8 h-8 mx-auto mb-2" />
+          <p>QR Code Error</p>
+        </div>
+      </div>
+    );
+  }
+  
+  try {
+    return (
+      <QRCodeSVG
+        value={value}
+        size={size}
+        level="M"
+        onError={() => setHasError(true)}
+      />
+    );
+  } catch (err) {
+    console.error('QR Code rendering error:', err);
+    return (
+      <div className="w-40 h-40 flex items-center justify-center text-red-500 text-xs text-center p-4">
+        <div>
+          <AlertCircle className="w-8 h-8 mx-auto mb-2" />
+          <p>Render Error</p>
+        </div>
+      </div>
+    );
+  }
+}
 
 function QRCodeStorage() {
   const [qrCodes, setQrCodes] = useState([]);
@@ -11,6 +49,7 @@ function QRCodeStorage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState(null);
   const [selectedFilter, setSelectedFilter] = useState('all');
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
 
   useEffect(() => {
     loadQRCodes();
@@ -23,12 +62,42 @@ function QRCodeStorage() {
   const loadQRCodes = async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await api.get('/videos/qr-codes');
-      setQrCodes(response.data);
-      setFilteredQrCodes(response.data);
+      
+      // Validate response data
+      if (!response.data || !Array.isArray(response.data)) {
+        throw new Error('Invalid response format from server');
+      }
+      
+      // Validate each QR code has required fields
+      const validQRCodes = response.data.filter(item => {
+        return item && item.videoId && item.shortUrl;
+      });
+      
+      if (validQRCodes.length < response.data.length) {
+        console.warn(`Filtered out ${response.data.length - validQRCodes.length} invalid QR codes`);
+      }
+      
+      setQrCodes(validQRCodes);
+      setFilteredQrCodes(validQRCodes);
     } catch (err) {
       console.error('Failed to load QR codes:', err);
-      setError(err.response?.data?.error || 'Failed to load QR codes');
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to load QR codes';
+      setError(errorMessage);
+      
+      // Provide helpful error messages
+      if (err.response?.status === 401) {
+        setError('Authentication required. Please log in again.');
+      } else if (err.response?.status === 403) {
+        setError('Access forbidden. You do not have permission to view QR codes.');
+      } else if (err.response?.status === 404) {
+        setError('QR codes endpoint not found. Please check backend configuration.');
+      } else if (err.response?.status >= 500) {
+        setError('Server error. Please try again later or contact support.');
+      } else if (!err.response) {
+        setError('Network error. Please check your connection and ensure the backend server is running.');
+      }
     } finally {
       setLoading(false);
     }
@@ -72,19 +141,41 @@ function QRCodeStorage() {
 
   const handleCopy = async (url, id) => {
     try {
+      if (!navigator.clipboard) {
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = url;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+        return;
+      }
+      
       await navigator.clipboard.writeText(url);
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+      alert('Failed to copy URL to clipboard. Please copy manually: ' + url);
     }
   };
 
   const handleDownloadQR = async (videoId, videoData) => {
     try {
       console.log('Downloading QR code for video:', videoId);
+      
+      if (!videoId) {
+        throw new Error('Video ID is required');
+      }
+      
       const response = await api.get(`/videos/${videoId}/qr-download`, {
-        responseType: 'blob'
+        responseType: 'blob',
+        timeout: 30000 // 30 second timeout
       });
       
       if (!response.data || response.data.size === 0) {
@@ -113,7 +204,24 @@ function QRCodeStorage() {
       console.log('QR code downloaded successfully as:', filename);
     } catch (err) {
       console.error('Failed to download QR code:', err);
-      const errorMessage = err.response?.data?.message || err.message || 'Unknown error';
+      let errorMessage = 'Unknown error';
+      
+      if (err.response?.status === 404) {
+        errorMessage = 'QR code file not found. It will be generated automatically on next request.';
+      } else if (err.response?.status === 401) {
+        errorMessage = 'Authentication required. Please log in again.';
+      } else if (err.response?.status === 403) {
+        errorMessage = 'Access forbidden. You do not have permission to download QR codes.';
+      } else if (err.response?.status >= 500) {
+        errorMessage = 'Server error. Please try again later.';
+      } else if (err.message) {
+        errorMessage = err.message;
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.response?.data?.error) {
+        errorMessage = err.response.data.error;
+      }
+      
       alert(`Failed to download QR code: ${errorMessage}`);
     }
   };
@@ -132,16 +240,29 @@ function QRCodeStorage() {
   if (error) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 mb-2">Error</h1>
-          <p className="text-slate-600">{error}</p>
-          <button
-            onClick={loadQRCodes}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold"
-          >
-            Retry
-          </button>
+        <div className="text-center max-w-md mx-auto p-6">
+          <div className="mb-4">
+            <AlertCircle className="w-16 h-16 text-red-500 mx-auto" />
+          </div>
+          <h1 className="text-2xl font-bold text-red-600 mb-2">Error Loading QR Codes</h1>
+          <p className="text-slate-600 mb-6">{error}</p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={loadQRCodes}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => setShowDiagnostic(true)}
+              className="px-4 py-2 bg-gray-600 text-white rounded-xl hover:bg-gray-700 font-semibold transition-colors flex items-center gap-2"
+            >
+              <Settings className="w-4 h-4" />
+              Run Diagnostics
+            </button>
+          </div>
         </div>
+        {showDiagnostic && <QRCodeDiagnostic onClose={() => setShowDiagnostic(false)} />}
       </div>
     );
   }
@@ -151,14 +272,24 @@ function QRCodeStorage() {
       <div className="w-full p-4 sm:p-6 lg:p-8 xl:p-10">
         {/* Header Container */}
         <div className="mb-8 lg:mb-10">
-          <div className="flex items-center gap-4 mb-3">
-            <div className="p-3 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 rounded-2xl shadow-xl shadow-blue-500/20">
-              <Filter className="w-8 h-8 text-white" />
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 rounded-2xl shadow-xl shadow-blue-500/20">
+                <Filter className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">QR Code Storage</h1>
+                <p className="text-slate-600 text-base sm:text-lg">Manage and download QR codes with short links for all your videos</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">QR Code Storage</h1>
-              <p className="text-slate-600 text-base sm:text-lg">Manage and download QR codes with short links for all your videos</p>
-            </div>
+            <button
+              onClick={() => setShowDiagnostic(true)}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-colors flex items-center gap-2 shadow-sm"
+              title="Run diagnostics to check for errors"
+            >
+              <Settings className="w-5 h-5" />
+              <span className="hidden sm:inline">Diagnostics</span>
+            </button>
           </div>
         </div>
 
@@ -232,11 +363,7 @@ function QRCodeStorage() {
                 {/* QR Code */}
                 <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4 rounded-xl mb-4 border-2 border-blue-200 flex justify-center shadow-inner group-hover:border-blue-300 transition-colors">
                   <div className="bg-white p-2 rounded-lg shadow-sm">
-                    <QRCodeSVG
-                      value={item.shortUrl}
-                      size={160}
-                      level="M"
-                    />
+                    <SafeQRCode value={item.shortUrl} size={160} />
                   </div>
                 </div>
 
@@ -319,6 +446,7 @@ function QRCodeStorage() {
           )}
         </div>
       </div>
+      {showDiagnostic && <QRCodeDiagnostic onClose={() => setShowDiagnostic(false)} />}
     </div>
   );
 }

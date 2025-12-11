@@ -15,6 +15,7 @@ import StreamDiagnostic from './pages/StreamDiagnostic';
 import UserManagement from './pages/UserManagement';
 import BulkUpload from './pages/BulkUpload';
 import QRCodeStorage from './pages/QRCodeStorage';
+import VideosTrash from './pages/VideosTrash';
 import MyStorageManager from './pages/CloudflareResourceManager';
 import ShortUrlRedirect from './pages/ShortUrlRedirect';
 
@@ -34,6 +35,7 @@ function App() {
         <Route path="admin/videos" element={<VideoList />} />
         <Route path="admin/videos/:id/edit" element={<VideoEdit />} />
         <Route path="admin/qr-codes" element={<QRCodeStorage />} />
+        <Route path="admin/trash" element={<VideosTrash />} />
         <Route path="admin/cloudflare" element={<MyStorageManager />} />
         <Route path="admin/redirects" element={<RedirectViewer />} />
         <Route path="admin/users" element={<UserManagement />} />

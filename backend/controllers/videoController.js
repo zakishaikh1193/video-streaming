@@ -783,7 +783,7 @@ export async function uploadVideo(req, res) {
       module: videoData.module,
       status: videoData.status,
       description: videoData.description,
-      rawFormData: { subject: normalizedSubject, course, grade, unit, lesson, module, description }
+      rawFormData: { subject: subjectValue, course, grade, unit, lesson, module, description }
     });
 
     // Create video record and redirect in parallel (faster)

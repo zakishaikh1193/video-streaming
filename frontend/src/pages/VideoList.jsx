@@ -4,6 +4,167 @@ import { Play, Edit, Trash2, ExternalLink, Eye, Calendar, Search, MessageCircle,
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
 
+// Extract frame from video and use as thumbnail image
+function VideoFrameThumbnail({ videoId }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState(null);
+  const [hasError, setHasError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const capturedRef = useRef(false);
+
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    const canvasEl = canvasRef.current;
+    if (!videoEl || !canvasEl || !videoId || capturedRef.current) return;
+
+    // Function to capture frame from video
+    const captureFrame = () => {
+      if (capturedRef.current) return;
+      
+      try {
+        const video = videoEl;
+        const canvas = canvasEl;
+        
+        // Check if video has valid dimensions
+        if (video.videoWidth === 0 || video.videoHeight === 0) {
+          // Wait a bit and try again
+          setTimeout(() => {
+            if (video.videoWidth > 0 && video.videoHeight > 0) {
+              captureFrame();
+            } else {
+              setHasError(true);
+              setIsLoading(false);
+            }
+          }, 500);
+          return;
+        }
+        
+        // Set canvas dimensions to match video
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        // Draw current video frame to canvas
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Convert canvas to image data URL
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setThumbnailUrl(dataUrl);
+        setIsLoading(false);
+        setHasError(false);
+        capturedRef.current = true;
+        
+        // Hide placeholder
+        const placeholder = document.getElementById(`placeholder-${videoId}`);
+        if (placeholder) {
+          placeholder.style.display = 'none';
+        }
+      } catch (err) {
+        console.error('Error capturing frame:', err);
+        setHasError(true);
+        setIsLoading(false);
+        capturedRef.current = true;
+      }
+    };
+
+    // When video metadata is loaded, seek to 1 second
+    const handleLoadedMetadata = () => {
+      if (videoEl.readyState >= 1) {
+        videoEl.currentTime = 1; // Seek to 1 second
+      }
+    };
+
+    // When video time updates to 1 second, capture the frame
+    const handleSeeked = () => {
+      if (videoEl.currentTime >= 0.9 && !capturedRef.current) {
+        captureFrame();
+      }
+    };
+
+    // When video can play, try to capture frame
+    const handleCanPlay = () => {
+      if (videoEl.readyState >= 2 && videoEl.currentTime >= 0.9 && !capturedRef.current) {
+        captureFrame();
+      }
+    };
+
+    // Error handler
+    const handleError = () => {
+      setHasError(true);
+      setIsLoading(false);
+      capturedRef.current = true;
+    };
+
+    videoEl.addEventListener('loadedmetadata', handleLoadedMetadata);
+    videoEl.addEventListener('seeked', handleSeeked);
+    videoEl.addEventListener('canplay', handleCanPlay);
+    videoEl.addEventListener('error', handleError);
+
+    // Load video (muted, no autoplay needed)
+    videoEl.muted = true;
+    videoEl.playsInline = true;
+    videoEl.preload = 'metadata';
+    videoEl.crossOrigin = 'anonymous'; // Required for canvas extraction
+    videoEl.load();
+
+    // Set timeout to show error if frame not captured within 5 seconds
+    const timeout = setTimeout(() => {
+      if (!capturedRef.current && isLoading) {
+        setHasError(true);
+        setIsLoading(false);
+        capturedRef.current = true;
+      }
+    }, 5000);
+
+    return () => {
+      clearTimeout(timeout);
+      videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      videoEl.removeEventListener('seeked', handleSeeked);
+      videoEl.removeEventListener('canplay', handleCanPlay);
+      videoEl.removeEventListener('error', handleError);
+    };
+  }, [videoId, isLoading]);
+
+  if (!videoId) return null;
+
+  return (
+    <>
+      {/* Hidden video element for frame extraction */}
+      <video
+        ref={videoRef}
+        src={`${getBackendBaseUrl()}/api/videos/${videoId}/stream`}
+        className="hidden"
+        muted
+        playsInline
+        preload="metadata"
+        crossOrigin="anonymous"
+      />
+      
+      {/* Hidden canvas for frame extraction */}
+      <canvas ref={canvasRef} className="hidden" />
+      
+      {/* Display extracted frame as thumbnail */}
+      {thumbnailUrl && !hasError && (
+        <div className="absolute inset-2 rounded-xl overflow-hidden border border-white shadow-md z-10">
+          <img
+            src={thumbnailUrl}
+            alt="Video thumbnail"
+            className="w-full h-full object-cover"
+            onError={() => {
+              setHasError(true);
+              const placeholder = document.getElementById(`placeholder-${videoId}`);
+              if (placeholder) {
+                placeholder.style.display = 'flex';
+              }
+            }}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 // Video Preview Component for Hover
 function VideoPreview({ videoId, isHovered }) {
   const videoRef = useRef(null);
@@ -48,7 +209,7 @@ function VideoPreview({ videoId, isHovered }) {
   if (!isHovered) return null;
   
   return (
-    <div className="absolute inset-4 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-black z-20">
+    <div className="absolute inset-2 rounded-xl overflow-hidden border-2 border-white shadow-2xl bg-black z-30">
       <video
         ref={videoRef}
         src={`${getBackendBaseUrl()}/api/videos/${videoId}/stream`}
@@ -930,74 +1091,58 @@ function VideoList() {
                   }}
                   onMouseLeave={() => {
                     setHoveredVideoId(null);
-                    // Stop video when mouse leaves
-                    const videoElement = videoPreviewRefs[video.video_id];
-                    if (videoElement) {
-                      videoElement.pause();
-                      videoElement.currentTime = 0;
-                    }
                   }}
                 >
-                  {thumbnailUrl ? (
-                    <div className="relative w-full h-full rounded-lg overflow-hidden border border-white shadow-md bg-white">
+                  {/* Video Frame Thumbnail - Extract frame from video and show as image */}
+                  <VideoFrameThumbnail videoId={video.video_id} />
+
+                  {/* Thumbnail Image - Show if available, overlay on top of video preview */}
+                  {thumbnailUrl && (
+                    <div className="relative w-full h-full rounded-lg overflow-hidden border border-white shadow-md z-10">
                       <img
                         src={thumbnailUrl}
                         alt={video.title}
                         className={`w-full h-full object-cover transition-opacity duration-300 ${
-                          hoveredVideoId === video.video_id ? 'opacity-0' : 'opacity-100'
+                          hoveredVideoId === video.video_id ? 'opacity-30' : 'opacity-100'
                         }`}
                         onError={(e) => {
-                        // Try alternative extensions if first one fails
-                        const currentSrc = e.target.src;
-                        const videoId = video.video_id;
-                        const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
-                        const currentExt = extensions.find(ext => currentSrc.includes(ext)) || extensions[0];
-                        const currentIndex = extensions.indexOf(currentExt);
-                        
-                        if (currentIndex < extensions.length - 1) {
-                          // Try next extension
-                          const nextExt = extensions[currentIndex + 1];
-                          e.target.src = `${backendUrl}/thumbnails/${videoId}${nextExt}`;
-                        } else {
-                          // All extensions failed, show placeholder
-                          e.target.style.display = 'none';
-                          const placeholder = e.target.parentElement.querySelector('.thumbnail-placeholder');
-                          if (placeholder) {
-                            placeholder.classList.remove('hidden');
-                            placeholder.classList.add('flex');
+                          // Try alternative extensions if first one fails
+                          const currentSrc = e.target.src;
+                          const videoId = video.video_id;
+                          const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+                          const currentExt = extensions.find(ext => currentSrc.includes(ext)) || extensions[0];
+                          const currentIndex = extensions.indexOf(currentExt);
+                          
+                          if (currentIndex < extensions.length - 1) {
+                            // Try next extension
+                            const nextExt = extensions[currentIndex + 1];
+                            e.target.src = `${backendUrl}/thumbnails/${videoId}${nextExt}`;
+                          } else {
+                            // All extensions failed, hide image and let video preview show
+                            e.target.style.display = 'none';
                           }
-                        }
-                      }}
-                      onLoad={() => {
-                        // Hide placeholder when image loads successfully
-                        const placeholder = e.target.parentElement?.parentElement?.querySelector('.thumbnail-placeholder');
-                        if (placeholder) {
-                          placeholder.classList.add('hidden');
-                          placeholder.classList.remove('flex');
-                        }
-                      }}
+                        }}
                       />
                     </div>
-                  ) : null}
-                  
-                  {/* Video Preview on Hover */}
-                  <VideoPreview 
-                    videoId={video.video_id} 
-                    isHovered={hoveredVideoId === video.video_id} 
-                  />
-                  
-                  {/* Placeholder with title-based gradient/initials */}
+                  )}
+
+                  {/* Default Placeholder - Show if video frame extraction fails or while loading */}
                   <div
-                    className={`thumbnail-placeholder absolute inset-2 flex flex-col items-center justify-center rounded-xl border-2 border-slate-300 shadow-inner ${
-                      thumbnailUrl && hoveredVideoId !== video.video_id ? 'hidden' : 'flex'
-                    }`}
+                    className="thumbnail-placeholder absolute inset-2 flex flex-col items-center justify-center rounded-xl border-2 border-slate-300 shadow-inner z-5 pointer-events-none"
                     style={{ background: getTitleGradient(video.title) }}
+                    id={`placeholder-${video.video_id}`}
                   >
                     <div className="w-16 h-16 bg-white/70 rounded-full flex items-center justify-center mb-2 shadow-md">
                       <span className="text-xl font-bold text-slate-800">{getTitleInitials(video.title)}</span>
                     </div>
-                    <p className="text-xs text-slate-700 font-semibold">No Thumbnail</p>
+                    <p className="text-xs text-slate-700 font-semibold">Loading...</p>
                   </div>
+                  
+                  {/* Video Preview on Hover - Overlay on top */}
+                  <VideoPreview 
+                    videoId={video.video_id} 
+                    isHovered={hoveredVideoId === video.video_id} 
+                  />
 
                   {/* Play Button Overlay (only on hover, but not when video preview is showing) */}
                   {hoveredVideoId !== video.video_id && (

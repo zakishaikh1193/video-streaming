@@ -41,7 +41,7 @@ function Sidebar() {
           <Link
             to="/admin/videos"
             className={`flex items-center px-4 py-3 rounded-lg transition-colors ${
-              location.pathname.startsWith('/admin/videos') 
+              location.pathname.startsWith('/admin/videos') && !location.pathname.includes('/inactive')
                 ? 'bg-blue-100 text-blue-800 shadow-sm' 
                 : 'text-gray-700 hover:bg-blue-50 hover:text-blue-700'
             }`}
@@ -50,6 +50,21 @@ function Sidebar() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
             Videos
+          </Link>
+
+          {/* 3.5. Inactive Videos */}
+          <Link
+            to="/admin/videos/inactive"
+            className={`flex items-center px-4 py-3 rounded-lg transition-colors ${
+              location.pathname === '/admin/videos/inactive'
+                ? 'bg-orange-100 text-orange-800 shadow-sm' 
+                : 'text-gray-700 hover:bg-orange-50 hover:text-orange-700'
+            }`}
+          >
+            <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Inactive Videos
           </Link>
 
           {/* 4. QR storage */}

@@ -3,7 +3,7 @@ import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
 // Initialize plugins once globally (prevents re-registration warnings)
 import '../utils/videojs-plugins';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Pause } from 'lucide-react';
 import VideoDiagnostic from './VideoDiagnostic';
 import api from '../services/api';
 
@@ -279,6 +279,17 @@ const videoPlayerStyles = `
   .video-js .vjs-menu-content::-webkit-scrollbar {
     display: none; /* Chrome, Safari, Opera */
   }
+  /* Fade in animation for pause button */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
   /* Professional big play button - Modern circular style */
   .video-js .vjs-big-play-button {
     width: 80px;
@@ -287,9 +298,11 @@ const videoPlayerStyles = `
     border-radius: 50%;
     background: rgba(0, 0, 0, 0.7);
     border: 3px solid rgba(255, 255, 255, 0.9);
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
+    position: absolute !important;
+    left: 50% !important;
+    top: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    margin: 0 !important;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     backdrop-filter: blur(10px);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -449,6 +462,9 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [showPauseButton, setShowPauseButton] = useState(false);
+  const pauseButtonTimeoutRef = useRef(null);
 
   // Check if URL is a mock Cloudflare URL - MUST match StreamPage's detection exactly
   const isMockUrl = (url) => {
@@ -535,7 +551,6 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
       preload: 'auto',
       autoplay: autoplay,
       liveui: true, // Enable live UI for live streams
-      // YouTube-like control bar layout - properly arranged controls
       controlBar: {
         children: [
           // Removed: playToggle (play/pause button)
@@ -544,7 +559,6 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
           'liveDisplay',
           'remainingTimeDisplay',
           'spacer', // Flexible spacer to push controls to right
-          'subsCapsButton', // Closed Captions button
           'fullscreenToggle' // Fullscreen
           // Removed: 'currentTimeDisplay', 'timeDivider', 'durationDisplay' (Time display)
           // Removed: 'playbackRateMenuButton' (now in settings menu)
@@ -603,19 +617,6 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
     
     // Force reload to ensure new video is loaded (important after replacement)
     player.load();
-
-    // Add captions
-    if (captions && captions.length > 0) {
-      captions.forEach((caption, index) => {
-        player.addRemoteTextTrack({
-          kind: 'captions',
-          src: caption.url,
-          srclang: caption.language || 'en',
-          label: caption.label || caption.language || 'English',
-          default: index === 0
-        }, false);
-      });
-    }
 
     // Event handlers
     player.ready(() => {
@@ -790,55 +791,59 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
 
       // Store handler for cleanup
       player._keydownHandler = handleKeyDown;
+
+      // Handle video click to show pause button
+      const handleVideoClick = () => {
+        if (player.paused()) {
+          player.play();
+        } else {
+          player.pause();
+        }
+        
+        // Show pause button when clicking (if playing)
+        if (!player.paused()) {
+          showPauseButtonWithTimeout();
+        }
+      };
+
+      // Add click handler to video element (reuse videoEl from above)
+      if (videoEl) {
+        videoEl.addEventListener('click', handleVideoClick);
+        player._videoClickHandler = handleVideoClick;
+      }
+
+      // Handle mouse enter/leave on video container to show/hide pause button (reuse playerEl from above)
+      if (playerEl) {
+        const handleMouseEnter = () => {
+          // Show pause button when mouse enters (only if playing)
+          if (!player.paused()) {
+            showPauseButtonWithTimeout();
+          }
+        };
+
+        const handleMouseLeave = () => {
+          // Hide pause button after 2 seconds when mouse leaves
+          if (pauseButtonTimeoutRef.current) {
+            clearTimeout(pauseButtonTimeoutRef.current);
+          }
+          pauseButtonTimeoutRef.current = setTimeout(() => {
+            setShowPauseButton(false);
+          }, 2000);
+        };
+
+        playerEl.addEventListener('mouseenter', handleMouseEnter);
+        playerEl.addEventListener('mouseleave', handleMouseLeave);
+        
+        player._mouseEnterHandler = handleMouseEnter;
+        player._mouseLeaveHandler = handleMouseLeave;
+      }
     });
 
     // Quality levels are now handled in the settings menu
     // No need to create separate quality selector button
     
     // Ensure settings menu button is visible and hide direct buttons
-    player.ready(() => {
-      // Show captions button
-      const captionsBtn = player.controlBar.getChild('subsCapsButton');
-      if (captionsBtn) {
-        captionsBtn.show();
-      }
-      
-      // Enable text tracks for captions
-      if (captions && captions.length > 0) {
-        captions.forEach((caption, index) => {
-          const track = player.addRemoteTextTrack({
-            kind: 'captions',
-            src: caption.src || caption.url,
-            srclang: caption.language || 'en',
-            label: caption.label || `Captions ${index + 1}`,
-            default: caption.default || false
-          }, false);
-          
-          // Enable the track if it's default
-          if (caption.default && track.track) {
-            track.track.mode = 'showing';
-          }
-        });
-      }
-      
-      // Enable audio tracking for automatic subtitle display
-      const videoEl = player.el().querySelector('video');
-      if (videoEl) {
-        // Listen for text track changes to display subtitles
-        const textTracks = videoEl.textTracks;
-        if (textTracks) {
-          for (let i = 0; i < textTracks.length; i++) {
-            const track = textTracks[i];
-            track.addEventListener('cuechange', () => {
-              if (track.mode === 'showing' && track.activeCues && track.activeCues.length > 0) {
-                // Subtitles are being displayed - track is working
-                console.log('Captions active:', track.activeCues[0].text);
-              }
-            });
-          }
-        }
-      }
-    });
+    // Remove captions handling entirely (no CC button, no tracks)
 
     player.on('loadstart', () => {
       console.log('Video: Load started');
@@ -860,9 +865,31 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
       setLoading(true);
     });
 
+    // Helper function to show pause button and auto-hide after 2 seconds
+    const showPauseButtonWithTimeout = () => {
+      // Only show if video is playing (check player state directly)
+      if (player.paused()) return;
+      
+      setShowPauseButton(true);
+      
+      // Clear existing timeout
+      if (pauseButtonTimeoutRef.current) {
+        clearTimeout(pauseButtonTimeoutRef.current);
+      }
+      
+      // Hide after 2 seconds
+      pauseButtonTimeoutRef.current = setTimeout(() => {
+        setShowPauseButton(false);
+      }, 2000);
+    };
+
     player.on('playing', () => {
       console.log('Video: Playing');
       setLoading(false);
+      setIsPlaying(true);
+      
+      // Show pause button when video starts playing, then auto-hide after 2 seconds
+      showPauseButtonWithTimeout();
       
       // Increment view count when video starts playing (only once per session)
       if (videoId && !player._viewCounted) {
@@ -871,6 +898,23 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
           console.warn('Failed to increment view count:', err);
         });
       }
+    });
+
+    player.on('pause', () => {
+      console.log('Video: Paused');
+      setIsPlaying(false);
+      setShowPauseButton(false);
+      // Clear timeout when paused
+      if (pauseButtonTimeoutRef.current) {
+        clearTimeout(pauseButtonTimeoutRef.current);
+      }
+    });
+
+    player.on('play', () => {
+      console.log('Video: Play');
+      setIsPlaying(true);
+      // Show pause button when play is triggered, then auto-hide after 2 seconds
+      showPauseButtonWithTimeout();
     });
 
     // YouTube-like features: Show time on hover over progress bar
@@ -963,7 +1007,31 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
 
     // Cleanup function
     return () => {
+      // Clear pause button timeout
+      if (pauseButtonTimeoutRef.current) {
+        clearTimeout(pauseButtonTimeoutRef.current);
+      }
+      
       if (playerRef.current) {
+        // Remove video click handler
+        if (playerRef.current._videoClickHandler) {
+          const videoEl = playerRef.current.el()?.querySelector('video');
+          if (videoEl) {
+            videoEl.removeEventListener('click', playerRef.current._videoClickHandler);
+          }
+        }
+        
+        // Remove mouse enter/leave handlers
+        const playerEl = playerRef.current.el();
+        if (playerEl) {
+          if (playerRef.current._mouseEnterHandler) {
+            playerEl.removeEventListener('mouseenter', playerRef.current._mouseEnterHandler);
+          }
+          if (playerRef.current._mouseLeaveHandler) {
+            playerEl.removeEventListener('mouseleave', playerRef.current._mouseLeaveHandler);
+          }
+        }
+        
         // Remove keydown handler
         if (playerRef.current._keydownHandler) {
           document.removeEventListener('keydown', playerRef.current._keydownHandler);
@@ -1047,6 +1115,68 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
           margin: '0 auto'
         }}
       />
+
+      {/* Custom Pause Button - Shows when playing, auto-hides after 2 seconds, shows on mouseover/click */}
+      {isPlaying && showPauseButton && (
+        <div 
+          className="absolute inset-0 flex items-center justify-center z-20"
+          style={{ 
+            pointerEvents: 'none',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (playerRef.current) {
+                playerRef.current.pause();
+              }
+            }}
+            className="pause-button-overlay"
+            style={{
+              width: '80px',
+              height: '80px',
+              borderRadius: '50%',
+              background: 'rgba(0, 0, 0, 0.7)',
+              border: '3px solid rgba(255, 255, 255, 0.9)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backdropFilter: 'blur(10px)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+              transition: 'opacity 0.3s ease-in-out, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              cursor: 'pointer',
+              pointerEvents: 'auto',
+              opacity: 1,
+              animation: 'fadeIn 0.2s ease-in',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.1)';
+              e.currentTarget.style.background = 'rgba(0, 0, 0, 0.85)';
+              // Cancel auto-hide on hover
+              if (pauseButtonTimeoutRef.current) {
+                clearTimeout(pauseButtonTimeoutRef.current);
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.background = 'rgba(0, 0, 0, 0.7)';
+              // Restart auto-hide timer when mouse leaves
+              if (pauseButtonTimeoutRef.current) {
+                clearTimeout(pauseButtonTimeoutRef.current);
+              }
+              pauseButtonTimeoutRef.current = setTimeout(() => {
+                setShowPauseButton(false);
+              }, 2000);
+            }}
+          >
+            <Pause className="w-8 h-8 text-white" fill="white" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

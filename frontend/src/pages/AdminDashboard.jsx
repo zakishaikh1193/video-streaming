@@ -53,6 +53,9 @@ function AdminDashboard() {
 
       const activeVideos = videos.filter(v => v.status === 'active');
       const inactiveVideos = videos.filter(v => v.status === 'inactive');
+      // Total videos = only active + inactive (exclude deleted videos)
+      const totalVideosCount = activeVideos.length + inactiveVideos.length;
+      
       const totalSize = videos.reduce((sum, v) => sum + (v.size || 0), 0);
       const totalDuration = videos.reduce((sum, v) => sum + (v.duration || 0), 0);
       const videosWithCaptions = videos.filter(v => v.captions && v.captions.length > 0).length;
@@ -102,7 +105,7 @@ function AdminDashboard() {
         }));
 
       setStats({
-        totalVideos: videos.length,
+        totalVideos: totalVideosCount, // Only active + inactive videos (exclude deleted)
         activeVideos: activeVideos.length,
         inactiveVideos: inactiveVideos.length,
         totalSize,

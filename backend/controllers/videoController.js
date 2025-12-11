@@ -421,7 +421,8 @@ export async function uploadVideo(req, res) {
 
     // Get form data
     const {
-      course,
+      subject,
+      course, // Keep for backward compatibility
       grade,
       unit,
       lesson,
@@ -436,8 +437,17 @@ export async function uploadVideo(req, res) {
       plannedPath
     } = req.body;
 
-    // Log received form data to verify course, unit, and module are being received
+    // Normalize subject (fallback to course for backward compatibility)
+    const normalizedSubject =
+      subject !== undefined && subject !== null && subject !== ''
+        ? subject
+        : course !== undefined && course !== null && course !== ''
+        ? course
+        : null;
+
+    // Log received form data to verify subject, unit, and module are being received
     console.log('[Upload Video] Extracted form data:', {
+      subject: normalizedSubject !== undefined ? `"${normalizedSubject}"` : 'undefined',
       course: course !== undefined ? `"${course}"` : 'undefined',
       grade: grade !== undefined ? `"${grade}"` : 'undefined',
       unit: unit !== undefined ? `"${unit}"` : 'undefined',
@@ -445,11 +455,7 @@ export async function uploadVideo(req, res) {
       module: module !== undefined ? `"${module}"` : 'undefined',
       title: title !== undefined ? `"${title}"` : 'undefined',
       description: description !== undefined ? `"${description}"` : 'undefined',
-      status: status !== undefined ? `"${status}"` : 'undefined',
-      subjectType: typeof subjectValue,
-      courseType: typeof course,
-      gradeType: typeof grade,
-      unitType: typeof unit
+      status: status !== undefined ? `"${status}"` : 'undefined'
     });
 
     // Check for duplicate title - prevent upload if title already exists
@@ -578,7 +584,9 @@ export async function uploadVideo(req, res) {
       title: title || videoId,
       description: description !== undefined && description !== null ? description : '',
       language,
-      subject: subjectValue !== undefined && subjectValue !== null && subjectValue.trim() !== '' ? subjectValue.trim() : null,
+      subject: normalizedSubject !== null && normalizedSubject !== undefined && String(normalizedSubject).trim() !== ''
+        ? String(normalizedSubject).trim()
+        : null,
       grade: grade !== undefined && grade !== null && grade.toString().trim() !== '' ? grade.toString().trim() : null,
       unit: unit !== undefined && unit !== null && unit.toString().trim() !== '' ? unit.toString().trim() : null,
       lesson: lesson !== undefined && lesson !== null && lesson.toString().trim() !== '' ? lesson.toString().trim() : null,
@@ -602,7 +610,7 @@ export async function uploadVideo(req, res) {
       module: videoData.module,
       status: videoData.status,
       description: videoData.description,
-      rawFormData: { subject: subjectValue, course, grade, unit, lesson, module, description }
+      rawFormData: { subject: normalizedSubject, course, grade, unit, lesson, module, description }
     });
 
     // Create video record and redirect in parallel (faster)
@@ -932,58 +940,144 @@ export async function deleteVideo(req, res) {
   }
 }
 
+export async function getDeletedVideos(req, res) {
+  try {
+    console.log('[Get Deleted Videos] Fetching all deleted videos');
+    
+    // Use SELECT * to get all columns, then map them in code
+    // This avoids issues with missing columns in the database
+    const query = `
+      SELECT * 
+      FROM videos 
+      WHERE status = 'deleted'
+      ORDER BY updated_at DESC
+    `;
+    
+    console.log('[Get Deleted Videos] Executing query');
+    const [deletedVideos] = await pool.execute(query);
+    
+    // Build response with QR code data
+    const baseUrl = config.urls?.base || config.urls?.frontend || 'http://localhost:5000';
+    const videos = deletedVideos.map(video => {
+      const shortUrl = video.redirect_slug 
+        ? `${baseUrl}/s/${video.redirect_slug}`
+        : video.streaming_url || `${baseUrl}/stream/${video.video_id}`;
+      
+      return {
+        id: video.id,
+        videoId: video.video_id,
+        title: video.title || video.video_id,
+        subject: video.subject || video.course || null,
+        course: video.subject || video.course || null,
+        grade: video.grade || null,
+        unit: video.unit || null,
+        lesson: video.lesson || null,
+        module: video.module || null,
+        topic: video.topic || null,
+        shortSlug: video.redirect_slug || null,
+        shortUrl: shortUrl,
+        qrUrl: video.qr_url || null,
+        streamingUrl: video.streaming_url || null,
+        createdAt: video.created_at,
+        updatedAt: video.updated_at,
+        deletedAt: video.updated_at // When status was changed to deleted
+      };
+    });
+    
+    console.log(`[Get Deleted Videos] Found ${videos.length} deleted videos`);
+    res.json(videos);
+  } catch (error) {
+    console.error('[Get Deleted Videos] Error details:', {
+      message: error.message,
+      code: error.code,
+      sqlState: error.sqlState,
+      sqlMessage: error.sqlMessage,
+      errno: error.errno,
+      stack: error.stack?.split('\n').slice(0, 5).join('\n')
+    });
+    
+    // Provide more helpful error messages
+    let errorMessage = error.message;
+    if (error.code === 'ER_BAD_FIELD_ERROR') {
+      errorMessage = 'Database schema mismatch. Some columns may be missing.';
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      errorMessage = 'Database connection failed. Please check database server.';
+    } else if (error.code === 'ER_ACCESS_DENIED_ERROR') {
+      errorMessage = 'Database access denied. Please check credentials.';
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to fetch deleted videos', 
+      message: errorMessage,
+      code: error.code,
+      details: process.env.NODE_ENV === 'development' ? {
+        sqlState: error.sqlState,
+        sqlMessage: error.sqlMessage,
+        errno: error.errno
+      } : undefined
+    });
+  }
+}
+
+export async function restoreVideo(req, res) {
+  try {
+    const { id } = req.params;
+    console.log(`[Restore Video] Restoring video with ID: ${id}`);
+    
+    const success = await videoService.restoreVideo(id);
+    if (success) {
+      console.log(`[Restore Video] Video ${id} restored successfully`);
+      res.json({ message: 'Video restored successfully' });
+    } else {
+      res.status(404).json({ error: 'Video not found' });
+    }
+  } catch (error) {
+    console.error('[Restore Video] Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
 export async function getAllQRCodes(req, res) {
   try {
     console.log('[Get All QR Codes] Fetching all videos with QR codes');
     
-    // Get all active videos with QR codes
+    // Use SELECT * to get all columns, then map them in code
+    // This avoids issues with missing columns in the database
     const query = `
-      SELECT 
-        id,
-        video_id as videoId,
-        title,
-        subject,
-        grade,
-        lesson,
-        module,
-        activity,
-        topic,
-        redirect_slug as shortSlug,
-        qr_url as qrUrl,
-        streaming_url as streamingUrl,
-        created_at as createdAt,
-        updated_at as updatedAt
+      SELECT * 
       FROM videos 
       WHERE status = 'active' 
         AND (qr_url IS NOT NULL OR redirect_slug IS NOT NULL)
       ORDER BY created_at DESC
     `;
     
+    console.log('[Get All QR Codes] Executing query');
     const [videos] = await pool.execute(query);
     
     // Build QR code data with short URLs
     const qrCodes = videos.map(video => {
       // Build short URL from redirect_slug
-      const shortUrl = video.shortSlug 
-        ? `${config.urls.base}/s/${video.shortSlug}`
-        : video.streamingUrl || `${config.urls.frontend}/stream/${video.videoId}`;
+      const baseUrl = config.urls?.base || config.urls?.frontend || 'http://localhost:5000';
+      const shortUrl = video.redirect_slug 
+        ? `${baseUrl}/s/${video.redirect_slug}`
+        : video.streaming_url || `${baseUrl}/stream/${video.video_id}`;
       
       return {
-        videoId: video.videoId,
-        title: video.title || video.videoId,
-        subject: video.subject || null,
-        course: video.subject || null, // Backward compatibility
+        videoId: video.video_id,
+        title: video.title || video.video_id,
+        subject: video.subject || video.course || null,
+        course: video.subject || video.course || null, // Backward compatibility
         grade: video.grade || null,
+        unit: video.unit || null,
         lesson: video.lesson || null,
         module: video.module || null,
-        activity: video.activity || null,
         topic: video.topic || null,
-        shortSlug: video.shortSlug || null,
+        shortSlug: video.redirect_slug || null,
         shortUrl: shortUrl,
-        qrUrl: video.qrUrl || null,
-        streamingUrl: video.streamingUrl || null,
-        createdAt: video.createdAt,
-        updatedAt: video.updatedAt
+        qrUrl: video.qr_url || null,
+        streamingUrl: video.streaming_url || null,
+        createdAt: video.created_at,
+        updatedAt: video.updated_at
       };
     });
     
@@ -991,10 +1085,34 @@ export async function getAllQRCodes(req, res) {
     
     res.json(qrCodes);
   } catch (error) {
-    console.error('Get all QR codes error:', error);
+    console.error('[Get All QR Codes] Error details:', {
+      message: error.message,
+      code: error.code,
+      sqlState: error.sqlState,
+      sqlMessage: error.sqlMessage,
+      errno: error.errno,
+      stack: error.stack?.split('\n').slice(0, 5).join('\n')
+    });
+    
+    // Provide more helpful error messages
+    let errorMessage = error.message;
+    if (error.code === 'ER_BAD_FIELD_ERROR') {
+      errorMessage = 'Database schema mismatch. Some columns may be missing.';
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      errorMessage = 'Database connection failed. Please check database server.';
+    } else if (error.code === 'ER_ACCESS_DENIED_ERROR') {
+      errorMessage = 'Database access denied. Please check credentials.';
+    }
+    
     res.status(500).json({ 
       error: 'Failed to fetch QR codes', 
-      message: error.message 
+      message: errorMessage,
+      code: error.code,
+      details: process.env.NODE_ENV === 'development' ? {
+        sqlState: error.sqlState,
+        sqlMessage: error.sqlMessage,
+        errno: error.errno
+      } : undefined
     });
   }
 }

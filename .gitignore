@@ -29,6 +29,10 @@ backend/upload/*
 backend/uploads/
 backend/uploads/*
 
+# Large model files
+whisper.cpp/models/
+*.bin
+
 # QR codes
 qr-codes/*.png
 qr-codes/*.jpg

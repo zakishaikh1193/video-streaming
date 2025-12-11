@@ -37,6 +37,31 @@ router.use((req, res, next) => {
 router.get('/', videoController.getAllVideos);
 router.get('/filters', videoController.getFilterValues);
 
+// Test endpoint for deleted route (no auth) - for debugging
+router.get('/test-deleted-route', (req, res) => {
+  console.log('[Route] /test-deleted-route hit');
+  res.json({ 
+    message: 'Deleted videos route is accessible', 
+    timestamp: new Date().toISOString(),
+    route: '/api/videos/deleted',
+    note: 'This is a test endpoint. The actual route requires authentication.'
+  });
+});
+
+// Deleted videos route - MUST be before any /:id or /:videoId routes
+router.get('/deleted', (req, res, next) => {
+  console.log('[Route] ===== /deleted route hit =====');
+  console.log('[Route] Method:', req.method);
+  console.log('[Route] Path:', req.path);
+  console.log('[Route] URL:', req.url);
+  console.log('[Route] Original URL:', req.originalUrl);
+  console.log('[Route] Auth header:', req.headers.authorization ? 'Present' : 'Missing');
+  if (req.headers.authorization) {
+    console.log('[Route] Auth token:', req.headers.authorization.substring(0, 20) + '...');
+  }
+  next();
+}, authenticateToken, videoController.getDeletedVideos);
+
 // Public API to get redirect info by slug (for frontend short URL handling)
 router.get('/redirect-info/:slug', async (req, res) => {
   try {
@@ -182,6 +207,16 @@ router.get('/test-qr-codes', (req, res) => {
   });
 });
 
+// Test endpoint for deleted videos route
+router.get('/test-deleted', (req, res) => {
+  res.json({ 
+    message: 'Deleted videos route is accessible', 
+    timestamp: new Date().toISOString(),
+    route: '/api/videos/deleted',
+    note: 'This is a test endpoint. The actual route is /deleted'
+  });
+});
+
 // Simple streaming test endpoint
 router.get('/test/:videoId/stream', async (req, res) => {
   console.log('[Test Route] Streaming test endpoint hit:', req.params.videoId);
@@ -201,6 +236,7 @@ router.get('/debug/routes', (req, res) => {
     routes: [
       'GET /api/videos/',
       'GET /api/videos/filters',
+      'GET /api/videos/deleted (protected)',
       'GET /api/videos/misc-videos (protected)',
       'GET /api/videos/qr-codes (protected)',
       'GET /api/videos/test-stream',
@@ -210,6 +246,7 @@ router.get('/debug/routes', (req, res) => {
       'POST /api/videos/bulk-upload (protected)',
       'PUT /api/videos/:id (protected)',
       'DELETE /api/videos/:id (protected)',
+      'POST /api/videos/:id/restore (protected)',
       'GET /api/videos/:videoId/versions (protected)',
       'GET /api/videos/:videoId/qr-download (protected)'
     ]
@@ -317,6 +354,7 @@ router.get('/:videoId/stream', async (req, res, next) => {
 
 router.put('/:id', authenticateToken, videoController.updateVideo);
 router.delete('/:id', authenticateToken, videoController.deleteVideo);
+router.post('/:id/restore', authenticateToken, videoController.restoreVideo);
 router.get('/:videoId/versions', authenticateToken, videoController.getVideoVersions);
 
 // Get video diagnostic information (must be before /:videoId route)

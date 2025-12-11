@@ -686,8 +686,8 @@ export async function uploadVideo(req, res) {
     const fileSize = fsSync.statSync(filePath).size;
     console.log(`[Upload Video] ✓ File verified, size: ${fileSize} bytes`);
 
-    // Generate QR code
-    const shortUrl = `${config.urls.base}/s/${redirectSlug}`;
+    // Generate QR code - must point to the public short link (frontend domain)
+    const shortUrl = `${config.urls.frontend}/${redirectSlug}`;
     let qrUrl = null;
     try {
       qrUrl = await qrCodeService.generateQRCode(videoId, shortUrl);
@@ -2189,8 +2189,12 @@ export async function downloadQRCode(req, res) {
       ? parts.join('_') + '.png'
       : `${videoId}_qr_code.png`;
     
-    // Download QR code using service
+    // Always (re)generate QR code with the public short link so the downloaded QR matches UI
+    // Build short URL using redirect_slug format: {frontend}/{redirect_slug}
+    const frontendUrl = config.urls?.frontend || 'http://localhost:5173';
+    const shortUrl = `${frontendUrl}/${video.redirect_slug || videoId}`;
     try {
+      await qrCodeService.generateQRCode(videoId, shortUrl);
       const qrBuffer = await qrCodeService.downloadQRCode(videoId);
       
       // Set headers for file download
@@ -2205,12 +2209,7 @@ export async function downloadQRCode(req, res) {
       if (qrError.message.includes('not found') || qrError.code === 'ENOENT') {
         console.log(`[Download QR Code] QR code file not found, generating new one for: ${videoId}`);
         
-        // Build short URL using redirect_slug format: http://localhost:5173/{redirect_slug}
-        // This matches the format shown on the video page
-        const frontendUrl = config.urls?.frontend || 'http://localhost:5173';
-        const shortUrl = `${frontendUrl}/${video.redirect_slug}`;
-        
-        // Generate QR code
+        // Generate QR code with the public short link
         const qrUrl = await qrCodeService.generateQRCode(videoId, shortUrl);
         
         // Download the newly generated QR code

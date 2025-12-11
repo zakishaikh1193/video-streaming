@@ -756,6 +756,21 @@ export async function getAllVideos(filters = {}) {
     params.push(filters.status.trim());
   }
   
+  // Filter by version (supports both numeric and string versions, including floating point)
+  if (filters.version !== undefined && filters.version !== null && filters.version !== '') {
+    const versionStr = String(filters.version).trim();
+    const versionNum = parseFloat(versionStr);
+    if (!isNaN(versionNum) && isFinite(versionNum)) {
+      // If it's a valid number, compare as number (handles floating point like 1.5, 2.3)
+      query += ' AND CAST(version AS DECIMAL(10,2)) = ?';
+      params.push(versionNum);
+    } else {
+      // If it's not a number, compare as string
+      query += ' AND version = ?';
+      params.push(versionStr);
+    }
+  }
+  
   // Don't filter by file_path - include all videos regardless of storage location
   // This ensures videos in upload/, my-storage/, and other locations are all shown
   query += ' ORDER BY created_at DESC';
@@ -923,13 +938,32 @@ export async function getFilterValues() {
       subjects: 'SELECT DISTINCT subject FROM videos WHERE subject IS NOT NULL AND subject != "" ORDER BY subject ASC',
       grades: 'SELECT DISTINCT grade FROM videos WHERE grade IS NOT NULL AND grade != "" ORDER BY grade ASC',
       lessons: 'SELECT DISTINCT lesson FROM videos WHERE lesson IS NOT NULL AND lesson != "" ORDER BY lesson ASC',
-      modules: 'SELECT DISTINCT module FROM videos WHERE module IS NOT NULL AND module != "" ORDER BY module ASC'
+      modules: 'SELECT DISTINCT module FROM videos WHERE module IS NOT NULL AND module != "" ORDER BY module ASC',
+      versions: 'SELECT DISTINCT version FROM videos WHERE version IS NOT NULL ORDER BY CAST(version AS DECIMAL(10,2)) ASC'
     };
 
     const [subjects] = await pool.execute(queries.subjects);
     const [grades] = await pool.execute(queries.grades);
     const [lessons] = await pool.execute(queries.lessons);
     const [modules] = await pool.execute(queries.modules);
+    
+    // Get versions - handle both numeric and string versions
+    let versions = [];
+    try {
+      const [versionsRows] = await pool.execute(queries.versions);
+      versions = versionsRows.map(row => String(row.version)).filter(Boolean);
+      // Sort versions numerically (handles floating point)
+      versions.sort((a, b) => {
+        const numA = parseFloat(a);
+        const numB = parseFloat(b);
+        if (!isNaN(numA) && !isNaN(numB)) {
+          return numA - numB;
+        }
+        return a.localeCompare(b);
+      });
+    } catch (versionError) {
+      console.log('[getFilterValues] Version column not found or error, skipping');
+    }
 
     return {
       subjects: subjects.map(row => row.subject).filter(Boolean),
@@ -937,7 +971,8 @@ export async function getFilterValues() {
       grades: grades.map(row => row.grade).filter(Boolean),
       units: units,
       lessons: lessons.map(row => row.lesson).filter(Boolean),
-      modules: modules.map(row => row.module).filter(Boolean)
+      modules: modules.map(row => row.module).filter(Boolean),
+      versions: versions
     };
   } catch (error) {
     console.error('Error fetching filter values:', error);

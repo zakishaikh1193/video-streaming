@@ -57,11 +57,51 @@ code {
     margin: 1cm;
     size: A4;
   }
-  
+
   /* Show printable content */
   div[style*="display: none"] {
     display: block !important;
   }
+}
+
+/* Custom Status Dropdown Styling */
+select[class*="status"] option,
+select option {
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+}
+
+select option[value="active"] {
+  background-color: #2563eb;
+  color: #ffffff;
+}
+
+select option[value="active"]:checked,
+select option[value="active"]:hover {
+  background-color: #1d4ed8;
+  color: #ffffff;
+}
+
+select option[value="inactive"] {
+  background-color: #ffffff;
+  color: #ea580c;
+}
+
+select option[value="inactive"]:checked,
+select option[value="inactive"]:hover {
+  background-color: #ea580c;
+  color: #ffffff;
+}
+
+select option[value="deleted"] {
+  background-color: #ffffff;
+  color: #dc2626;
+}
+
+select option[value="deleted"]:checked,
+select option[value="deleted"]:hover {
+  background-color: #dc2626;
+  color: #ffffff;
 }
 
 

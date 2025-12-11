@@ -19,7 +19,8 @@ function MyStorageManager() {
   const [editFormData, setEditFormData] = useState({});
   const [stagedFiles, setStagedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0); // Overall progress
+  const [individualProgress, setIndividualProgress] = useState({}); // Progress per video ID
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
   const [uploadedVideos, setUploadedVideos] = useState([]); // Store successfully uploaded videos
@@ -46,6 +47,7 @@ function MyStorageManager() {
         unit: item.unit || '',
         lesson: item.lesson || '',
         module: item.module || '',
+        version: item.version || '',
         description: item.description || '',
         status: item.status || 'active',
         // Store file metadata (File objects can't be serialized)
@@ -222,6 +224,7 @@ function MyStorageManager() {
         unit: '',
         lesson: '',
         module: '',
+        version: '',
         status: 'active',
         description: ''
       };
@@ -247,6 +250,7 @@ function MyStorageManager() {
     }
     setStagedFiles([]);
     setUploadProgress(0);
+    setIndividualProgress({});
     setUploading(false);
     // Clear localStorage
     localStorage.removeItem('cloudflare_staged_files');
@@ -275,9 +279,7 @@ function MyStorageManager() {
       if (!item.lesson || !item.lesson.trim()) {
         validationErrors.push(`File ${index + 1} (${item.file.name}): Lesson is required`);
       }
-      if (!item.module || !item.module.trim()) {
-        validationErrors.push(`File ${index + 1} (${item.file.name}): Module is required`);
-      }
+      // Module field is now optional - removed validation
       if (!item.status || !item.status.trim()) {
         validationErrors.push(`File ${index + 1} (${item.file.name}): Status is required`);
       }
@@ -290,6 +292,12 @@ function MyStorageManager() {
 
     setUploading(true);
     setUploadProgress(0);
+    // Initialize progress for all videos at once
+    const initialProgress = {};
+    stagedFiles.forEach(item => {
+      initialProgress[item.id] = 0;
+    });
+    setIndividualProgress(initialProgress);
     setError('');
     setErrorDetails(null);
     setSuccess('');
@@ -300,6 +308,7 @@ function MyStorageManager() {
     try {
       for (let i = 0; i < stagedFiles.length; i++) {
         const item = stagedFiles[i];
+        
         const formData = new FormData();
         formData.append('video', item.file);
         formData.append('title', item.title || item.file.name);
@@ -319,6 +328,7 @@ function MyStorageManager() {
         const unitValue = normalizeValue(item.unit);
         const lessonValue = normalizeValue(item.lesson);
         const moduleValue = normalizeValue(item.module);
+        const versionValue = normalizeValue(item.version);
         const descriptionValue = normalizeValue(item.description);
         const statusValue = item.status && item.status.trim() !== '' ? item.status.trim() : 'active';
         
@@ -330,6 +340,7 @@ function MyStorageManager() {
         formData.append('unit', unitValue || '');
         formData.append('lesson', lessonValue || '');
         formData.append('module', moduleValue || '');
+        formData.append('version', versionValue || '');
         formData.append('description', descriptionValue || '');
         formData.append('status', statusValue);
         
@@ -342,6 +353,7 @@ function MyStorageManager() {
           unit: item.unit,
           lesson: item.lesson,
           module: item.module,
+          version: item.version,
           description: item.description,
           status: item.status
         });
@@ -352,6 +364,7 @@ function MyStorageManager() {
           unit: unitValue,
           lesson: lessonValue,
           module: moduleValue,
+          version: versionValue,
           description: descriptionValue,
           status: statusValue,
           title: item.title || item.file.name
@@ -360,7 +373,21 @@ function MyStorageManager() {
 
         try {
           const response = await api.post('/videos/upload', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
+            headers: { 'Content-Type': 'multipart/form-data' },
+            onUploadProgress: (progressEvent) => {
+              if (progressEvent.total) {
+                const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                // Update individual progress for this video and calculate overall progress
+                setIndividualProgress(prev => {
+                  const updated = { ...prev, [item.id]: percentCompleted };
+                  // Calculate overall progress
+                  const totalProgress = Object.values(updated).reduce((sum, p) => sum + p, 0);
+                  const overallPercent = Math.round(totalProgress / stagedFiles.length);
+                  setUploadProgress(overallPercent);
+                  return updated;
+                });
+              }
+            }
           });
 
           // Log the response to verify subject information is being returned
@@ -395,8 +422,14 @@ function MyStorageManager() {
             title: videoResponse.title || item.title || item.file?.name?.replace(/\.[^/.]+$/, '') || 'Screen Recording'
           });
 
-          const percent = Math.round(((i + 1) / stagedFiles.length) * 100);
-          setUploadProgress(percent);
+          // Mark this video as 100% complete and calculate overall progress
+          setIndividualProgress(prev => {
+            const updated = { ...prev, [item.id]: 100 };
+            const totalProgress = Object.values(updated).reduce((sum, p) => sum + p, 0);
+            const overallPercent = Math.round(totalProgress / stagedFiles.length);
+            setUploadProgress(overallPercent);
+            return updated;
+          });
         } catch (uploadErr) {
           // Detailed diagnostics for this specific file upload
           const diagnostics = {
@@ -456,11 +489,12 @@ function MyStorageManager() {
         setSuccess(`Uploaded ${successfullyUploaded.length} video(s) successfully`);
         setUploadedVideos(successfullyUploaded); // Store uploaded videos to display
         // Clear staged files and localStorage on successful upload
-        setStagedFiles([]);
-        setUploadProgress(0);
-        localStorage.removeItem('cloudflare_staged_files');
-        localStorage.removeItem('cloudflare_upload_progress');
-        localStorage.removeItem('cloudflare_uploading');
+    setStagedFiles([]);
+    setUploadProgress(0);
+    setIndividualProgress({});
+    localStorage.removeItem('cloudflare_staged_files');
+    localStorage.removeItem('cloudflare_upload_progress');
+    localStorage.removeItem('cloudflare_uploading');
         loadVideos();
       } else {
         // If no videos were successfully uploaded, show error
@@ -804,7 +838,7 @@ function MyStorageManager() {
                   <button
                   onClick={() => {
                     // Generate CSV from staged files client-side
-                    const headers = ['ID', 'Title', 'Planned Path', 'Preview URL', 'Subject', 'Grade', 'Unit', 'Lesson', 'Module', 'Description'];
+                    const headers = ['ID', 'Title', 'Planned Path', 'Preview URL', 'Subject', 'Grade', 'Unit', 'Lesson', 'Module', 'Version', 'Description'];
                     const rows = stagedFiles.map((f) => [
                       f.videoId || '',
                       f.title || f.file.name.replace(/\.[^/.]+$/, ''),
@@ -815,6 +849,7 @@ function MyStorageManager() {
                       f.unit || '',
                       f.lesson || '',
                       f.module || '',
+                      f.version || '',
                       f.description || ''
                     ]);
                     const escapeCSV = (value) => {
@@ -870,8 +905,10 @@ function MyStorageManager() {
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Unit</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Lesson</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Module</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Version</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Description</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Upload Progress</th>
                     <th className="px-6 py-3 text-center text-xs font-semibold text-slate-700 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
@@ -940,22 +977,82 @@ function MyStorageManager() {
                       <td className="px-6 py-3">
                         <input
                           type="text"
-                          value={item.module}
+                          value={item.module || ''}
                           onChange={(e) => updateStagedField(item.id, 'module', e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2 text-sm bg-white border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 text-slate-900 placeholder:text-slate-400"
                           placeholder="Module"
+                          style={{ color: item.module ? '#1e293b' : '#64748b' }}
                         />
                       </td>
                       <td className="px-6 py-3">
-                        <select
-                          value={item.status || 'active'}
-                          onChange={(e) => updateStagedField(item.id, 'status', e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="active">Active</option>
-                          <option value="inactive">Inactive</option>
-                          <option value="deleted">Deleted</option>
-                        </select>
+                        <input
+                          type="text"
+                          value={item.version || ''}
+                          onChange={(e) => updateStagedField(item.id, 'version', e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-white border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 text-slate-900 placeholder:text-slate-400"
+                          placeholder="Version"
+                          style={{ color: item.version ? '#1e293b' : '#64748b' }}
+                        />
+                      </td>
+                      <td className="px-6 py-3">
+                        <div className="relative">
+                          <select
+                            value={item.status || 'active'}
+                            onChange={(e) => updateStagedField(item.id, 'status', e.target.value)}
+                            className={`w-full px-3 py-2.5 text-sm font-semibold rounded-lg border-2 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 cursor-pointer ${
+                              item.status === 'active' 
+                                ? 'bg-blue-100 border-blue-500 text-blue-900 hover:bg-blue-200' 
+                                : item.status === 'inactive'
+                                ? 'bg-orange-100 border-orange-500 text-orange-900 hover:bg-orange-200'
+                                : 'bg-red-100 border-red-500 text-red-900 hover:bg-red-200'
+                            }`}
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23334155' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                              backgroundRepeat: 'no-repeat',
+                              backgroundPosition: 'right 0.75rem center',
+                              backgroundSize: '12px',
+                              paddingRight: '2.5rem',
+                              appearance: 'none',
+                              WebkitAppearance: 'none',
+                              MozAppearance: 'none',
+                              color: item.status === 'active' ? '#1e3a8a' : item.status === 'inactive' ? '#9a3412' : '#991b1b'
+                            }}
+                          >
+                            <option 
+                              value="active"
+                              style={{ 
+                                backgroundColor: '#ffffff', 
+                                color: '#1e3a8a',
+                                padding: '0.5rem',
+                                fontWeight: '600'
+                              }}
+                            >
+                              Active
+                            </option>
+                            <option 
+                              value="inactive"
+                              style={{ 
+                                backgroundColor: '#ffffff', 
+                                color: '#9a3412',
+                                padding: '0.5rem',
+                                fontWeight: '600'
+                              }}
+                            >
+                              Inactive
+                            </option>
+                            <option 
+                              value="deleted"
+                              style={{ 
+                                backgroundColor: '#ffffff', 
+                                color: '#991b1b',
+                                padding: '0.5rem',
+                                fontWeight: '600'
+                              }}
+                            >
+                              Deleted
+                            </option>
+                          </select>
+                        </div>
                       </td>
                       <td className="px-6 py-3">
                         <textarea
@@ -965,6 +1062,27 @@ function MyStorageManager() {
                           className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                           placeholder="Enter description..."
                         />
+                      </td>
+                      <td className="px-6 py-3">
+                        {uploading && individualProgress[item.id] !== undefined ? (
+                          <div className="w-full">
+                            <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden mb-1">
+                              <div
+                                className={`h-full rounded-full transition-all duration-300 ${
+                                  individualProgress[item.id] === 100
+                                    ? 'bg-gradient-to-r from-green-500 to-emerald-500'
+                                    : 'bg-gradient-to-r from-blue-500 to-indigo-500'
+                                }`}
+                                style={{ width: `${individualProgress[item.id]}%` }}
+                              />
+                            </div>
+                            <div className="text-xs text-slate-600 text-center">
+                              {individualProgress[item.id]}%
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-400 text-center">-</div>
+                        )}
                       </td>
                       <td className="px-6 py-3 text-center">
                             <button

@@ -32,6 +32,7 @@ function App() {
 
         <Route path="admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
         <Route path="admin/bulk-upload" element={<ProtectedRoute><BulkUpload /></ProtectedRoute>} />
+        <Route path="admin/videos/inactive" element={<ProtectedRoute><VideoList /></ProtectedRoute>} />
         <Route path="admin/videos" element={<ProtectedRoute><VideoList /></ProtectedRoute>} />
         <Route path="admin/videos/:id/edit" element={<ProtectedRoute><VideoEdit /></ProtectedRoute>} />
         <Route path="admin/qr-codes" element={<ProtectedRoute><QRCodeStorage /></ProtectedRoute>} />

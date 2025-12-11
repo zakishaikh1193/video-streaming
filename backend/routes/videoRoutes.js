@@ -37,30 +37,8 @@ router.use((req, res, next) => {
 router.get('/', videoController.getAllVideos);
 router.get('/filters', videoController.getFilterValues);
 
-// Test endpoint for deleted route (no auth) - for debugging
-router.get('/test-deleted-route', (req, res) => {
-  console.log('[Route] /test-deleted-route hit');
-  res.json({ 
-    message: 'Deleted videos route is accessible', 
-    timestamp: new Date().toISOString(),
-    route: '/api/videos/deleted',
-    note: 'This is a test endpoint. The actual route requires authentication.'
-  });
-});
-
-// Deleted videos route - MUST be before any /:id or /:videoId routes
-router.get('/deleted', (req, res, next) => {
-  console.log('[Route] ===== /deleted route hit =====');
-  console.log('[Route] Method:', req.method);
-  console.log('[Route] Path:', req.path);
-  console.log('[Route] URL:', req.url);
-  console.log('[Route] Original URL:', req.originalUrl);
-  console.log('[Route] Auth header:', req.headers.authorization ? 'Present' : 'Missing');
-  if (req.headers.authorization) {
-    console.log('[Route] Auth token:', req.headers.authorization.substring(0, 20) + '...');
-  }
-  next();
-}, authenticateToken, videoController.getDeletedVideos);
+// Increment video views (public endpoint - no auth required)
+router.post('/:videoId/increment-views', videoController.incrementVideoViews);
 
 // Public API to get redirect info by slug (for frontend short URL handling)
 router.get('/redirect-info/:slug', async (req, res) => {
@@ -352,6 +330,9 @@ router.get('/:videoId/stream', async (req, res, next) => {
   }
 });
 
+router.get('/by-id/:id', authenticateToken, videoController.getVideoById);
+router.get('/diagnostic/:id', authenticateToken, videoController.getVideoMetadataDiagnostic);
+router.post('/diagnostic/:id/quick-fix', authenticateToken, videoController.quickFixVideoMetadata);
 router.put('/:id', authenticateToken, videoController.updateVideo);
 router.delete('/:id', authenticateToken, videoController.deleteVideo);
 router.post('/:id/restore', authenticateToken, videoController.restoreVideo);

@@ -1,11 +1,9 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
-import HomePage from './pages/HomePage';
 import PublicVideoPage from './pages/PublicVideoPage';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
-import VideoUpload from './pages/VideoUpload';
 import VideoList from './pages/VideoList';
 import VideoEdit from './pages/VideoEdit';
 import RedirectViewer from './pages/RedirectViewer';
@@ -24,7 +22,7 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
-        <Route index element={<HomePage />} />
+        <Route index element={<Navigate to="/admin/login" replace />} />
         <Route path="video/:videoId" element={<PublicVideoPage />} />
         <Route path="stream/:videoId" element={<StreamPage />} />
         <Route path="diagnostic" element={<StreamDiagnostic />} />
@@ -32,7 +30,6 @@ function App() {
         <Route path="admin/login" element={<AdminLogin />} />
 
         <Route path="admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-        <Route path="admin/upload" element={<ProtectedRoute><VideoUpload /></ProtectedRoute>} />
         <Route path="admin/bulk-upload" element={<ProtectedRoute><BulkUpload /></ProtectedRoute>} />
         <Route path="admin/videos" element={<ProtectedRoute><VideoList /></ProtectedRoute>} />
         <Route path="admin/videos/:id/edit" element={<ProtectedRoute><VideoEdit /></ProtectedRoute>} />

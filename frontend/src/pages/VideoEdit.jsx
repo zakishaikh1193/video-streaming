@@ -34,9 +34,8 @@ function VideoEdit() {
 
   const fetchVideo = async () => {
     try {
-      const response = await api.get(`/videos`);
-      const videos = response.data;
-      const foundVideo = videos.find(v => v.id === parseInt(id));
+      const response = await api.get(`/videos/by-id/${id}`);
+      const foundVideo = response.data;
       
       if (foundVideo) {
         setVideo(foundVideo);
@@ -45,6 +44,13 @@ function VideoEdit() {
         const subjectValue = foundVideo.subject || foundVideo.course || '';
         const finalSubject = subjectValue !== null && subjectValue !== undefined && subjectValue !== '' ? String(subjectValue) : '';
         
+        // Helper function to safely convert values to string, preserving 0 and valid numbers
+        const safeStringValue = (value) => {
+          if (value === null || value === undefined || value === '') return '';
+          // Convert to string but preserve 0, '0', and other valid values
+          return String(value);
+        };
+        
         setFormData({
           title: foundVideo.title || '',
           description: foundVideo.description || '',
@@ -52,12 +58,25 @@ function VideoEdit() {
           status: foundVideo.status || 'active',
           subject: finalSubject,
           course: finalSubject, // Keep for backward compatibility
-          grade: foundVideo.grade !== null && foundVideo.grade !== undefined && foundVideo.grade !== '' ? String(foundVideo.grade) : '',
-          unit: foundVideo.unit !== null && foundVideo.unit !== undefined && foundVideo.unit !== '' && foundVideo.unit !== 0 && foundVideo.unit !== '0' ? String(foundVideo.unit) : '',
-          lesson: foundVideo.lesson !== null && foundVideo.lesson !== undefined && foundVideo.lesson !== '' ? String(foundVideo.lesson) : '',
-          module: foundVideo.module !== null && foundVideo.module !== undefined && foundVideo.module !== '' && foundVideo.module !== 0 && foundVideo.module !== '0' ? String(foundVideo.module) : '',
+          grade: safeStringValue(foundVideo.grade),
+          unit: safeStringValue(foundVideo.unit),
+          lesson: safeStringValue(foundVideo.lesson),
+          module: safeStringValue(foundVideo.module),
           streaming_url: foundVideo.streaming_url || '',
           file_path: foundVideo.file_path || ''
+        });
+        
+        // Log the fetched data for debugging
+        console.log('[VideoEdit] Fetched video data:', {
+          id: foundVideo.id,
+          video_id: foundVideo.video_id,
+          subject: foundVideo.subject,
+          course: foundVideo.course,
+          grade: foundVideo.grade,
+          unit: foundVideo.unit,
+          lesson: foundVideo.lesson,
+          module: foundVideo.module,
+          allKeys: Object.keys(foundVideo)
         });
       } else {
         setError('Video not found');
@@ -143,6 +162,27 @@ function VideoEdit() {
       } else if (updateData.course) {
         updateData.subject = updateData.course;
       }
+      
+      // Ensure module is sent (preserve empty strings as they might be valid)
+      // Convert empty strings to null only if we want to clear the field
+      if (updateData.module === '') {
+        updateData.module = null;
+      }
+      if (updateData.subject === '') {
+        updateData.subject = null;
+      }
+      if (updateData.unit === '') {
+        updateData.unit = null;
+      }
+      
+      // Log what we're sending
+      console.log('[VideoEdit] Sending update data:', {
+        subject: updateData.subject,
+        module: updateData.module,
+        unit: updateData.unit,
+        grade: updateData.grade,
+        lesson: updateData.lesson
+      });
 
       await api.put(`/videos/${id}`, updateData);
       setSuccess('Video updated successfully!');
@@ -195,7 +235,7 @@ function VideoEdit() {
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 w-full overflow-y-auto">
-      <div className="max-w-7xl mx-auto w-full h-full p-4 sm:p-6 lg:p-8 xl:p-10">
+      <div className="w-full h-full p-4 sm:p-6 lg:p-8 xl:p-10">
         {/* Header Section */}
         <div className="mb-8">
           <button
@@ -242,9 +282,9 @@ function VideoEdit() {
 
         <form onSubmit={handleSubmit} className="space-y-6" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
           {/* Main Content Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
             {/* Left Column - Form Fields */}
-            <div className="lg:col-span-2 space-y-6 lg:space-y-8">
+            <div className="lg:col-span-3 space-y-6 lg:space-y-8">
               {/* Basic Information Card */}
               <div className="bg-white rounded-2xl shadow-xl border border-slate-200/60 p-6 sm:p-8 lg:p-10 hover:shadow-2xl transition-shadow duration-300">
                 <div className="flex items-center gap-4 mb-8 pb-6 border-b border-slate-200">
@@ -408,7 +448,7 @@ function VideoEdit() {
             </div>
 
             {/* Right Column - Video Replacement & Info */}
-            <div className="space-y-6 lg:space-y-8">
+            <div className="lg:col-span-1 space-y-6 lg:space-y-8">
               {/* Video Replacement Card */}
               <div className="bg-white rounded-2xl shadow-xl border border-slate-200/60 p-6 sm:p-8 hover:shadow-2xl transition-shadow duration-300">
                 <div className="flex items-center gap-4 mb-6 pb-6 border-b border-slate-200">

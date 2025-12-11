@@ -5,6 +5,21 @@ import 'video.js/dist/video-js.css';
 import '../utils/videojs-plugins';
 import { AlertCircle } from 'lucide-react';
 import VideoDiagnostic from './VideoDiagnostic';
+import api from '../services/api';
+
+// Function to increment view count
+const incrementViewCount = async (videoId) => {
+  try {
+    if (!videoId) return;
+    
+    // Try by video_id first, then by database ID or redirect_slug
+    await api.post(`/videos/${videoId}/increment-views`);
+    console.log(`[VideoPlayer] View count incremented for video: ${videoId}`);
+  } catch (error) {
+    // Silent fail - don't interrupt video playback
+    console.warn('[VideoPlayer] Could not increment view count:', error.message);
+  }
+};
 
 // Custom styles for Video.js player - Professional YouTube-like appearance
 const videoPlayerStyles = `
@@ -907,6 +922,14 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
     player.on('playing', () => {
       console.log('Video: Playing');
       setLoading(false);
+      
+      // Increment view count when video starts playing (only once per session)
+      if (videoId && !player._viewCounted) {
+        player._viewCounted = true; // Prevent multiple counts in same session
+        incrementViewCount(videoId).catch(err => {
+          console.warn('Failed to increment view count:', err);
+        });
+      }
     });
 
     // YouTube-like features: Show time on hover over progress bar

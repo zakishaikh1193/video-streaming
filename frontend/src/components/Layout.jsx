@@ -31,6 +31,11 @@ function Layout() {
     return <Outlet />;
   }
 
+  // For login page, render full screen without navbar/sidebar/padding
+  if (isLogin) {
+    return <Outlet />;
+  }
+
   return (
     <div className="min-h-screen bg-white">
       {!isStreaming && <Navbar />}

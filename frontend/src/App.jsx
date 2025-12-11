@@ -14,6 +14,7 @@ import StreamDiagnostic from './pages/StreamDiagnostic';
 import UserManagement from './pages/UserManagement';
 import BulkUpload from './pages/BulkUpload';
 import QRCodeStorage from './pages/QRCodeStorage';
+import VideosTrash from './pages/VideosTrash';
 import MyStorageManager from './pages/CloudflareResourceManager';
 import ShortUrlRedirect from './pages/ShortUrlRedirect';
 
@@ -27,6 +28,7 @@ function App() {
         <Route path="diagnostic" element={<StreamDiagnostic />} />
         <Route path="diagnostic/:videoId" element={<StreamDiagnostic />} />
         <Route path="admin/login" element={<AdminLogin />} />
+
         <Route path="admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
         <Route path="admin/bulk-upload" element={<ProtectedRoute><BulkUpload /></ProtectedRoute>} />
         <Route path="admin/videos" element={<ProtectedRoute><VideoList /></ProtectedRoute>} />
@@ -37,6 +39,7 @@ function App() {
         <Route path="admin/users" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
         <Route path="admin/captions/:videoId" element={<ProtectedRoute><CaptionUpload /></ProtectedRoute>} />
         <Route path="admin/versions/:videoId" element={<ProtectedRoute><VersionHistory /></ProtectedRoute>} />
+
         {/* Catch-all route for short URLs - must be last */}
         <Route path=":slug" element={<ShortUrlRedirect />} />
       </Route>

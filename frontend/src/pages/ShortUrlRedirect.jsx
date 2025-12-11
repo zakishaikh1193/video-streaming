@@ -271,8 +271,23 @@ function ShortUrlRedirect() {
         /* Ensure video player controls are visible in fullscreen */
         .video-js {
           width: 100% !important;
-          height: 85% !important;
+          height: 100% !important;
           background: #000 !important;
+        }
+        
+        /* Custom scrollbar for subject information panel */
+        .subject-info-panel::-webkit-scrollbar {
+          width: 6px;
+        }
+        .subject-info-panel::-webkit-scrollbar-track {
+          background: #1a1a1a;
+        }
+        .subject-info-panel::-webkit-scrollbar-thumb {
+          background: #4a4a4a;
+          border-radius: 3px;
+        }
+        .subject-info-panel::-webkit-scrollbar-thumb:hover {
+          background: #5a5a5a;
         }
         
         .video-js .vjs-control-bar {
@@ -466,15 +481,92 @@ function ShortUrlRedirect() {
         }}
       >
         {streamingUrl && video ? (
-          <div className="w-full h-full flex items-center justify-center relative">
-            {/* Fullscreen Video Player - Controls must be visible */}
-            <div className="w-full h-full relative" style={{ position: 'relative', zIndex: 1 }}>
+          <div className="w-full h-full flex relative">
+            {/* Video Player - 75% width on left */}
+            <div className="w-3/4 h-full relative" style={{ position: 'relative', zIndex: 1 }}>
               <VideoPlayer 
                 src={streamingUrl} 
                 captions={video.captions || []} 
                 autoplay={true}
                 videoId={video.video_id || slug}
               />
+            </div>
+            
+            {/* Subject Information Container - 25% width on right */}
+            <div className="w-1/4 h-full bg-black border-l border-gray-800 overflow-y-auto subject-info-panel" style={{ userSelect: 'none' }}>
+              <div className="p-6">
+                {/* Header */}
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-1 h-6 bg-blue-600 rounded"></div>
+                    <h2 className="text-lg font-bold text-white">Subject Information</h2>
+                  </div>
+                </div>
+
+                {/* Subject Information Fields */}
+                <div className="space-y-4">
+                  {/* Subject */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">SUBJECT</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {(() => {
+                        const subjectValue = video.subject || video.course || '';
+                        return subjectValue !== null && subjectValue !== undefined && subjectValue !== '' ? String(subjectValue) : '-';
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Grade */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">GRADE</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {video.grade !== null && video.grade !== undefined && video.grade !== '' ? String(video.grade) : '-'}
+                    </div>
+                  </div>
+
+                  {/* Unit */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">UNIT</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {(() => {
+                        const unitValue = video.unit;
+                        return unitValue !== null && unitValue !== undefined && unitValue !== '' && unitValue !== 0 && unitValue !== '0' ? String(unitValue) : '-';
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Lesson */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">LESSON</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {video.lesson !== null && video.lesson !== undefined && video.lesson !== '' ? String(video.lesson) : '-'}
+                    </div>
+                  </div>
+
+                  {/* Module */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">MODULE</div>
+                    <div className="w-full px-3 py-2.5 text-sm font-bold text-white bg-gray-900 border border-gray-700 rounded-lg text-center">
+                      {(() => {
+                        const moduleValue = video.module;
+                        return moduleValue !== null && moduleValue !== undefined && moduleValue !== '' && moduleValue !== 0 && moduleValue !== '0' ? String(moduleValue) : '-';
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <div className="text-xs uppercase text-gray-400 mb-2">DESCRIPTION</div>
+                    <div className="w-full px-3 py-2.5 text-sm text-gray-300 bg-gray-900 border border-gray-700 rounded-lg min-h-[100px]">
+                      {video.description && video.description.trim() !== '' ? (
+                        <div className="whitespace-pre-wrap break-words">{video.description}</div>
+                      ) : (
+                        <div className="text-gray-500 italic">No description available</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
             
             {/* Error Messages */}

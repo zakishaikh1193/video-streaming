@@ -1232,6 +1232,24 @@ export async function deleteVideo(id) {
 }
 
 /**
+ * Get all deleted videos
+ */
+export async function getDeletedVideos() {
+  const query = 'SELECT * FROM videos WHERE status = "deleted" ORDER BY updated_at DESC';
+  const [rows] = await pool.execute(query);
+  return rows;
+}
+
+/**
+ * Restore deleted video (set status back to active)
+ */
+export async function restoreVideo(id) {
+  const query = 'UPDATE videos SET status = "active", updated_at = NOW() WHERE id = ?';
+  const [result] = await pool.execute(query, [id]);
+  return result.affectedRows > 0;
+}
+
+/**
  * Get latest version number for a video ID
  */
 export async function getLatestVersion(videoId) {

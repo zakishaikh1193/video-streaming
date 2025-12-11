@@ -185,6 +185,16 @@ router.get('/test-qr-codes', (req, res) => {
   });
 });
 
+// Test endpoint for deleted videos route
+router.get('/test-deleted', (req, res) => {
+  res.json({ 
+    message: 'Deleted videos route is accessible', 
+    timestamp: new Date().toISOString(),
+    route: '/api/videos/deleted',
+    note: 'This is a test endpoint. The actual route is /deleted'
+  });
+});
+
 // Simple streaming test endpoint
 router.get('/test/:videoId/stream', async (req, res) => {
   console.log('[Test Route] Streaming test endpoint hit:', req.params.videoId);
@@ -204,6 +214,7 @@ router.get('/debug/routes', (req, res) => {
     routes: [
       'GET /api/videos/',
       'GET /api/videos/filters',
+      'GET /api/videos/deleted (protected)',
       'GET /api/videos/misc-videos (protected)',
       'GET /api/videos/qr-codes (protected)',
       'GET /api/videos/test-stream',
@@ -213,6 +224,7 @@ router.get('/debug/routes', (req, res) => {
       'POST /api/videos/bulk-upload (protected)',
       'PUT /api/videos/:id (protected)',
       'DELETE /api/videos/:id (protected)',
+      'POST /api/videos/:id/restore (protected)',
       'GET /api/videos/:videoId/versions (protected)',
       'GET /api/videos/:videoId/qr-download (protected)'
     ]
@@ -323,6 +335,7 @@ router.get('/diagnostic/:id', authenticateToken, videoController.getVideoMetadat
 router.post('/diagnostic/:id/quick-fix', authenticateToken, videoController.quickFixVideoMetadata);
 router.put('/:id', authenticateToken, videoController.updateVideo);
 router.delete('/:id', authenticateToken, videoController.deleteVideo);
+router.post('/:id/restore', authenticateToken, videoController.restoreVideo);
 router.get('/:videoId/versions', authenticateToken, videoController.getVideoVersions);
 
 // Get video diagnostic information (must be before /:videoId route)

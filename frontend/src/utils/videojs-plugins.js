@@ -12,11 +12,21 @@
 // Suppress the re-registration warning from Video.js
 // This is safe because we're importing the plugins once at the module level
 const originalWarn = console.warn;
+const suppressedWarnings = [
+  'plugin named "qualityLevels" already exists',
+  'A plugin named "qualityLevels" already exists'
+];
+
 console.warn = (...args) => {
   // Filter out the qualityLevels re-registration warning
-  if (args[0] && typeof args[0] === 'string' && 
-      args[0].includes('plugin named "qualityLevels" already exists')) {
-    return; // Suppress this specific warning
+  const message = args[0];
+  if (message && typeof message === 'string') {
+    const shouldSuppress = suppressedWarnings.some(warning => 
+      message.includes(warning)
+    );
+    if (shouldSuppress) {
+      return; // Suppress this specific warning
+    }
   }
   originalWarn.apply(console, args);
 };
@@ -26,6 +36,6 @@ console.warn = (...args) => {
 import 'videojs-contrib-quality-levels';
 import 'videojs-hls-quality-selector';
 
-// Restore original console.warn after imports
-console.warn = originalWarn;
+// Keep warning suppression active (don't restore immediately)
+// The warning only appears during hot-reload in development, which is harmless
 

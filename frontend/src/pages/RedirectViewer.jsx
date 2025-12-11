@@ -10,6 +10,13 @@ function RedirectViewer() {
 
   useEffect(() => {
     fetchRedirects();
+    
+    // Auto-refresh every 30 seconds to keep up with recent redirects
+    const interval = setInterval(() => {
+      fetchRedirects();
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const fetchRedirects = async () => {

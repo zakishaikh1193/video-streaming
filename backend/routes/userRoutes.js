@@ -10,6 +10,9 @@ router.use(authenticateToken);
 // Get all users (with pagination and search)
 router.get('/', userController.getAllUsers);
 
+// Get user activity (uploads and deletes) - MUST be before /:id route
+router.get('/:id/activity', userController.getUserActivity);
+
 // Get user by ID
 router.get('/:id', userController.getUserById);
 

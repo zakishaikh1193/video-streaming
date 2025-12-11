@@ -30,7 +30,8 @@ export async function createVideo(videoData) {
     duration,
     size,
     version = 1,
-    status = 'active'
+    status = 'active',
+    createdBy = null // User ID who uploaded the video
   } = videoData;
   
   // Ensure ALL required columns exist before inserting - create them if they don't exist
@@ -44,7 +45,8 @@ export async function createVideo(videoData) {
     { name: 'module', after: 'lesson', index: false, type: 'VARCHAR(255)' },
     { name: 'topic', after: 'module', index: false, type: 'VARCHAR(255)' },
     { name: 'status', after: 'version', index: false, type: 'VARCHAR(50)' },
-    { name: 'description', after: 'topic', index: false, type: 'TEXT' }
+    { name: 'description', after: 'topic', index: false, type: 'TEXT' },
+    { name: 'created_by', after: 'status', index: true, type: 'INT' }
   ];
 
   console.log('[createVideo] Ensuring all required columns exist...');
@@ -88,6 +90,7 @@ export async function createVideo(videoData) {
   const hasLessonColumn = await columnExists('lesson');
   const hasStatusColumn = await columnExists('status');
   const hasDescriptionColumn = await columnExists('description');
+  const hasCreatedByColumn = await columnExists('created_by');
   
   console.log('[createVideo] Column existence check:', {
     subject: hasSubjectColumn,
@@ -96,7 +99,8 @@ export async function createVideo(videoData) {
     lesson: hasLessonColumn,
     module: hasModuleColumn,
     status: hasStatusColumn,
-    description: hasDescriptionColumn
+    description: hasDescriptionColumn,
+    created_by: hasCreatedByColumn
   });
   
   // Determine which field to use for subject/course - use subject value, map to course if needed
@@ -223,6 +227,13 @@ export async function createVideo(videoData) {
         columns.push('status');
         placeholders.push('?');
         values.push(statusValue);
+      }
+      
+      // Add created_by if column exists
+      if (hasCreatedByColumn) {
+        columns.push('created_by');
+        placeholders.push('?');
+        values.push(createdBy);
       }
       
       query = `INSERT INTO videos (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`;
@@ -666,23 +677,35 @@ export async function getAllVideos(filters = {}) {
   }
   
   // Filter by subject (check both subject and course columns)
-  if (filters.subject) {
+  // Use case-insensitive comparison for better matching
+  if (filters.subject && filters.subject.trim()) {
+    const subjectValue = filters.subject.trim();
     if (hasSubjectColumn) {
-      query += ' AND subject = ?';
+      // Use LOWER() for case-insensitive comparison
+      query += ' AND LOWER(TRIM(subject)) = LOWER(TRIM(?))';
+      params.push(subjectValue);
+      console.log('[getAllVideos] ✓ Filtering by subject:', subjectValue, '(hasSubjectColumn:', hasSubjectColumn, ')');
     } else if (hasCourseColumn) {
-      query += ' AND course = ?';
+      query += ' AND LOWER(TRIM(course)) = LOWER(TRIM(?))';
+      params.push(subjectValue);
+      console.log('[getAllVideos] ✓ Filtering by course (legacy):', subjectValue);
+    } else {
+      console.warn('[getAllVideos] ⚠️ Subject filter provided but neither subject nor course column exists!');
     }
-    params.push(filters.subject);
   }
   
   // Support legacy 'course' filter for backward compatibility
-  if (filters.course) {
+  if (filters.course && filters.course.trim()) {
+    const courseValue = filters.course.trim();
     if (hasSubjectColumn) {
-      query += ' AND subject = ?';
+      query += ' AND LOWER(TRIM(subject)) = LOWER(TRIM(?))';
+      params.push(courseValue);
+      console.log('[getAllVideos] ✓ Filtering by course (mapped to subject):', courseValue);
     } else if (hasCourseColumn) {
-      query += ' AND course = ?';
+      query += ' AND LOWER(TRIM(course)) = LOWER(TRIM(?))';
+      params.push(courseValue);
+      console.log('[getAllVideos] ✓ Filtering by course (legacy):', courseValue);
     }
-    params.push(filters.course);
   }
   
   if (filters.grade) {
@@ -728,17 +751,18 @@ export async function getAllVideos(filters = {}) {
     params.push(filters.unit);
   }
   
-  if (filters.status) {
+  if (filters.status && filters.status.trim()) {
     query += ' AND status = ?';
-    params.push(filters.status);
+    params.push(filters.status.trim());
   }
   
   // Don't filter by file_path - include all videos regardless of storage location
   // This ensures videos in upload/, my-storage/, and other locations are all shown
   query += ' ORDER BY created_at DESC';
   
-  console.log('[getAllVideos] Query:', query);
-  console.log('[getAllVideos] Params:', params);
+  // Log the final query for debugging
+  console.log('[getAllVideos] Final query:', query);
+  console.log('[getAllVideos] Query params:', params);
   
   const [rows] = await pool.execute(query, params);
   
@@ -1199,36 +1223,20 @@ export async function updateVideo(id, updates) {
  * Delete video (hard delete: remove video, versions, and redirect)
  */
 export async function deleteVideo(id) {
-  // Fetch video first to get video_id and redirect_slug
+  // Fetch video first to verify it exists
   const video = await getVideoById(id);
   if (!video) {
     return false;
   }
 
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    // Delete versions tied to this video_id
-    await connection.execute('DELETE FROM video_versions WHERE video_id = ?', [video.video_id]);
-
-    // Delete redirect by slug if present
-    if (video.redirect_slug) {
-      await connection.execute('DELETE FROM redirects WHERE slug = ?', [video.redirect_slug]);
-    }
-
-    // Delete the video row itself
-    const [result] = await connection.execute('DELETE FROM videos WHERE id = ?', [id]);
-
-    await connection.commit();
-    return result.affectedRows > 0;
-  } catch (error) {
-    await connection.rollback();
-    console.error('[deleteVideo] Hard delete failed:', error.message);
-    throw error;
-  } finally {
-    connection.release();
-  }
+  // Soft delete: Set status to 'deleted' instead of hard deleting
+  // This allows videos to be restored from trash
+  // Keep redirects and video_versions for restoration
+  const query = 'UPDATE videos SET status = "deleted", updated_at = NOW() WHERE id = ?';
+  const [result] = await pool.execute(query, [id]);
+  
+  console.log(`[deleteVideo] Soft deleted video ID ${id} (video_id: ${video.video_id})`);
+  return result.affectedRows > 0;
 }
 
 /**
@@ -1247,6 +1255,71 @@ export async function restoreVideo(id) {
   const query = 'UPDATE videos SET status = "active", updated_at = NOW() WHERE id = ?';
   const [result] = await pool.execute(query, [id]);
   return result.affectedRows > 0;
+}
+
+/**
+ * Permanently delete video (hard delete: remove from database)
+ * This removes the video record, redirects, and related data permanently
+ */
+export async function permanentDeleteVideo(id) {
+  // Fetch video first to verify it exists and is deleted
+  const video = await getVideoById(id);
+  if (!video) {
+    return false;
+  }
+
+  // Hard delete: Remove video record permanently
+  // Also delete related redirects
+  try {
+    // Delete redirects associated with this video
+    if (video.redirect_slug) {
+      await pool.execute('DELETE FROM redirects WHERE slug = ?', [video.redirect_slug]);
+    }
+    if (video.video_id) {
+      await pool.execute('DELETE FROM redirects WHERE slug = ?', [video.video_id]);
+    }
+
+    // Delete video record permanently
+    const query = 'DELETE FROM videos WHERE id = ?';
+    const [result] = await pool.execute(query, [id]);
+    
+    console.log(`[permanentDeleteVideo] Permanently deleted video ID ${id} (video_id: ${video.video_id})`);
+    return result.affectedRows > 0;
+  } catch (error) {
+    console.error(`[permanentDeleteVideo] Error permanently deleting video ID ${id}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Permanently delete multiple videos at once
+ */
+export async function permanentDeleteVideos(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return { success: false, deleted: 0, errors: [] };
+  }
+
+  const results = {
+    success: true,
+    deleted: 0,
+    errors: []
+  };
+
+  for (const id of ids) {
+    try {
+      const deleted = await permanentDeleteVideo(id);
+      if (deleted) {
+        results.deleted++;
+      } else {
+        results.errors.push({ id, error: 'Video not found or already deleted' });
+      }
+    } catch (error) {
+      results.success = false;
+      results.errors.push({ id, error: error.message });
+    }
+  }
+
+  return results;
 }
 
 /**

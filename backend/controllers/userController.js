@@ -91,6 +91,137 @@ export async function getAllUsers(req, res) {
 }
 
 /**
+ * Get user activity (uploads and deletes)
+ * Note: Currently shows all activity since videos table doesn't track user_id
+ * This can be enhanced later when user tracking is added to videos table
+ */
+export async function getUserActivity(req, res) {
+  try {
+    const { id } = req.params;
+    const { type = 'all' } = req.query; // 'uploads', 'deletes', or 'all'
+    
+    // Get user info
+    const [users] = await pool.execute(
+      'SELECT id, username, full_name FROM admins WHERE id = ?',
+      [id]
+    );
+    
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const user = users[0];
+    const activities = {
+      uploads: [],
+      deletes: []
+    };
+    
+    // Get uploads - videos created by this user
+    if (type === 'all' || type === 'uploads') {
+      // Check if created_by column exists
+      let uploadsQuery = `
+        SELECT 
+          id, video_id, title, subject, grade, lesson, module,
+          file_path, streaming_url, qr_url, redirect_slug,
+          created_at, updated_at, status
+        FROM videos
+        WHERE status = 'active'
+      `;
+      
+      // Try to filter by created_by if column exists
+      try {
+        const [columnCheck] = await pool.execute(`
+          SELECT COUNT(*) as count 
+          FROM information_schema.COLUMNS 
+          WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = 'videos' 
+            AND COLUMN_NAME = 'created_by'
+        `);
+        
+        if (columnCheck[0].count > 0) {
+          // Column exists, filter by user
+          uploadsQuery += ` AND created_by = ?`;
+          const [uploads] = await pool.execute(uploadsQuery + ` ORDER BY created_at DESC LIMIT 100`, [id]);
+          activities.uploads = uploads.map(video => ({
+            id: video.id,
+            video_id: video.video_id,
+            title: video.title,
+            subject: video.subject,
+            grade: video.grade,
+            lesson: video.lesson,
+            module: video.module,
+            file_path: video.file_path,
+            streaming_url: video.streaming_url,
+            qr_url: video.qr_url,
+            redirect_slug: video.redirect_slug,
+            created_at: video.created_at,
+            updated_at: video.updated_at,
+            status: video.status
+          }));
+        } else {
+          // Column doesn't exist yet, return empty array with note
+          activities.uploads = [];
+          console.log(`[getUserActivity] created_by column doesn't exist yet - returning empty uploads`);
+        }
+      } catch (error) {
+        // If query fails, return empty array
+        console.error('[getUserActivity] Error checking for created_by column:', error);
+        activities.uploads = [];
+      }
+    }
+    
+    // Get deletes - videos with status='deleted' (for now show all, can add deleted_by column later)
+    if (type === 'all' || type === 'deletes') {
+      // For now, show all deleted videos since we don't track who deleted them
+      // TODO: Add deleted_by column to track who deleted each video
+      const [deletes] = await pool.execute(`
+        SELECT 
+          id, video_id, title, subject, grade, lesson, module,
+          file_path, streaming_url, qr_url, redirect_slug,
+          created_at, updated_at, status
+        FROM videos
+        WHERE status = 'deleted'
+        ORDER BY updated_at DESC
+        LIMIT 100
+      `);
+      
+      activities.deletes = deletes.map(video => ({
+        id: video.id,
+        video_id: video.video_id,
+        title: video.title,
+        subject: video.subject,
+        grade: video.grade,
+        lesson: video.lesson,
+        module: video.module,
+        file_path: video.file_path,
+        streaming_url: video.streaming_url,
+        qr_url: video.qr_url,
+        redirect_slug: video.redirect_slug,
+        created_at: video.created_at,
+        deleted_at: video.updated_at, // When status was changed to deleted
+        status: video.status
+      }));
+    }
+    
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        full_name: user.full_name
+      },
+      activities,
+      summary: {
+        total_uploads: activities.uploads.length,
+        total_deletes: activities.deletes.length
+      }
+    });
+  } catch (error) {
+    console.error('Get user activity error:', error);
+    res.status(500).json({ error: 'Failed to fetch user activity', message: error.message });
+  }
+}
+
+/**
  * Get user by ID
  */
 export async function getUserById(req, res) {

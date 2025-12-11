@@ -27,7 +27,75 @@ function MyStorageManager() {
   // Load videos from database
   useEffect(() => {
     loadVideos();
+    // Restore staged files from localStorage
+    restoreStagedFiles();
   }, []);
+
+  // Save staged files to localStorage whenever they change
+  useEffect(() => {
+    if (stagedFiles.length > 0) {
+      // Convert File objects to serializable format
+      const serializableStagedFiles = stagedFiles.map(item => ({
+        id: item.id,
+        videoId: item.videoId,
+        plannedPath: item.plannedPath,
+        title: item.title || '',
+        subject: item.subject || '',
+        course: item.course || '',
+        grade: item.grade || '',
+        unit: item.unit || '',
+        lesson: item.lesson || '',
+        module: item.module || '',
+        description: item.description || '',
+        status: item.status || 'active',
+        // Store file metadata (File objects can't be serialized)
+        fileMetadata: {
+          name: item.file?.name || '',
+          size: item.file?.size || 0,
+          type: item.file?.type || '',
+          lastModified: item.file?.lastModified || Date.now()
+        }
+      }));
+      localStorage.setItem('cloudflare_staged_files', JSON.stringify(serializableStagedFiles));
+      localStorage.setItem('cloudflare_upload_progress', uploadProgress.toString());
+      localStorage.setItem('cloudflare_uploading', uploading.toString());
+    } else {
+      // Clear localStorage when staged files are empty
+      localStorage.removeItem('cloudflare_staged_files');
+      localStorage.removeItem('cloudflare_upload_progress');
+      localStorage.removeItem('cloudflare_uploading');
+    }
+  }, [stagedFiles, uploadProgress, uploading]);
+
+  // Restore staged files from localStorage
+  const restoreStagedFiles = () => {
+    try {
+      const saved = localStorage.getItem('cloudflare_staged_files');
+      const savedProgress = localStorage.getItem('cloudflare_upload_progress');
+      const savedUploading = localStorage.getItem('cloudflare_uploading');
+      
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Restore staged files (without File objects - user will need to re-select files)
+          setStagedFiles(parsed.map(item => ({
+            ...item,
+            file: null, // File object cannot be restored, will be null
+            hasFile: false // Flag to indicate file needs to be re-selected
+          })));
+          
+          if (savedProgress) {
+            setUploadProgress(parseFloat(savedProgress));
+          }
+          if (savedUploading === 'true') {
+            setUploading(false); // Reset uploading state on restore
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to restore staged files:', error);
+    }
+  };
 
   const loadVideos = async () => {
     setLoading(true);
@@ -174,8 +242,16 @@ function MyStorageManager() {
   };
 
   const clearStaged = () => {
+    if (stagedFiles.length > 0 && !window.confirm('Are you sure you want to clear all staged files? This will remove all upload progress and form data.')) {
+      return;
+    }
     setStagedFiles([]);
     setUploadProgress(0);
+    setUploading(false);
+    // Clear localStorage
+    localStorage.removeItem('cloudflare_staged_files');
+    localStorage.removeItem('cloudflare_upload_progress');
+    localStorage.removeItem('cloudflare_uploading');
   };
 
   const uploadStaged = async () => {
@@ -379,7 +455,12 @@ function MyStorageManager() {
       if (successfullyUploaded.length > 0) {
         setSuccess(`Uploaded ${successfullyUploaded.length} video(s) successfully`);
         setUploadedVideos(successfullyUploaded); // Store uploaded videos to display
-        clearStaged();
+        // Clear staged files and localStorage on successful upload
+        setStagedFiles([]);
+        setUploadProgress(0);
+        localStorage.removeItem('cloudflare_staged_files');
+        localStorage.removeItem('cloudflare_upload_progress');
+        localStorage.removeItem('cloudflare_uploading');
         loadVideos();
       } else {
         // If no videos were successfully uploaded, show error
@@ -669,12 +750,30 @@ function MyStorageManager() {
         {/* Staged uploads from PC */}
         {stagedFiles.length > 0 && (
           <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-6">
+            {/* Notice for restored files without file objects */}
+            {stagedFiles.some(item => !item.file || item.hasFile === false) && (
+              <div className="mb-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 rounded-xl flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <div className="font-semibold text-yellow-800 mb-1">Files Need to be Re-selected</div>
+                  <div className="text-sm text-yellow-700">
+                    Your upload progress and form data have been restored, but the video files need to be re-selected. 
+                    Please re-select the files using the "Upload from PC" button, or clear this section to start fresh.
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-3">
                 <div className="p-2 bg-emerald-100 rounded-xl">
                   <Upload className="w-5 h-5 text-emerald-600" />
                   </div>
                 Staged Videos ({stagedFiles.length})
+                {uploadProgress > 0 && uploadProgress < 100 && (
+                  <span className="text-sm font-normal text-slate-500">
+                    - {uploadProgress}% complete
+                  </span>
+                )}
               </h3>
                 <div className="flex gap-2 flex-wrap">
                     <button

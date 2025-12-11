@@ -1,8 +1,67 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Play, Edit, Trash2, ExternalLink, Eye, Calendar, Search, MessageCircle, Bug, X, AlertCircle, CheckCircle, Info, Grid3x3, List } from 'lucide-react';
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
+
+// Video Preview Component for Hover
+function VideoPreview({ videoId, isHovered }) {
+  const videoRef = useRef(null);
+  const timeUpdateHandlerRef = useRef(null);
+  
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+    
+    if (isHovered) {
+      // Start playing when hovered
+      videoEl.currentTime = 0;
+      videoEl.play().catch(err => {
+        console.log('Auto-play prevented:', err);
+      });
+      
+      // Loop the first 10 seconds
+      timeUpdateHandlerRef.current = () => {
+        if (videoEl.currentTime >= 10) {
+          videoEl.currentTime = 0;
+          videoEl.play().catch(() => {});
+        }
+      };
+      videoEl.addEventListener('timeupdate', timeUpdateHandlerRef.current);
+    } else {
+      // Stop and reset when not hovered
+      videoEl.pause();
+      videoEl.currentTime = 0;
+      if (timeUpdateHandlerRef.current) {
+        videoEl.removeEventListener('timeupdate', timeUpdateHandlerRef.current);
+        timeUpdateHandlerRef.current = null;
+      }
+    }
+    
+    return () => {
+      if (videoEl && timeUpdateHandlerRef.current) {
+        videoEl.removeEventListener('timeupdate', timeUpdateHandlerRef.current);
+      }
+    };
+  }, [isHovered]);
+  
+  if (!isHovered) return null;
+  
+  return (
+    <div className="absolute inset-4 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-black z-20">
+      <video
+        ref={videoRef}
+        src={`${getBackendBaseUrl()}/api/videos/${videoId}/stream`}
+        className="w-full h-full object-cover"
+        muted
+        playsInline
+        onError={(e) => {
+          console.error('Video preview error:', e);
+        }}
+      />
+    </div>
+  );
+}
 
 function VideoList() {
   const [videos, setVideos] = useState([]);
@@ -30,6 +89,8 @@ function VideoList() {
   const [diagnosticData, setDiagnosticData] = useState(null);
   const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
+  const [hoveredVideoId, setHoveredVideoId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   useEffect(() => {
     fetchFilterOptions();
@@ -37,8 +98,21 @@ function VideoList() {
   }, []);
 
   useEffect(() => {
+    // Reset loading state when filters change
+    setLoading(true);
     fetchVideos();
-  }, [filters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filters.search,
+    filters.subject,
+    filters.course,
+    filters.grade,
+    filters.unit,
+    filters.lesson,
+    filters.module,
+    filters.moduleNumber,
+    filters.status
+  ]);
 
   const fetchFilterOptions = async () => {
     try {
@@ -51,17 +125,20 @@ function VideoList() {
 
   const fetchVideos = async () => {
     try {
+      setLoading(true);
       const params = new URLSearchParams();
-      if (filters.search) params.append('search', filters.search);
-      if (filters.subject) params.append('subject', filters.subject);
-      if (filters.course) params.append('subject', filters.course); // Backward compatibility - map course to subject
-      if (filters.grade) params.append('grade', filters.grade);
-      if (filters.unit) params.append('unit', filters.unit);
-      if (filters.lesson) params.append('lesson', filters.lesson);
-      if (filters.module) params.append('module', filters.module);
-      if (filters.moduleNumber) params.append('moduleNumber', filters.moduleNumber);
-      if (filters.status) params.append('status', filters.status);
+      if (filters.search && filters.search.trim()) params.append('search', filters.search.trim());
+      if (filters.subject && filters.subject.trim()) params.append('subject', filters.subject.trim());
+      // Backward compatibility: send course separately (backend maps course -> subject)
+      if (filters.course && filters.course.trim()) params.append('course', filters.course.trim());
+      if (filters.grade && filters.grade.toString().trim()) params.append('grade', filters.grade.toString().trim());
+      if (filters.unit && filters.unit.toString().trim()) params.append('unit', filters.unit.toString().trim());
+      if (filters.lesson && filters.lesson.toString().trim()) params.append('lesson', filters.lesson.toString().trim());
+      if (filters.module && filters.module.toString().trim()) params.append('module', filters.module.toString().trim());
+      if (filters.moduleNumber && filters.moduleNumber.toString().trim()) params.append('moduleNumber', filters.moduleNumber.toString().trim());
+      if (filters.status && filters.status.trim()) params.append('status', filters.status.trim());
 
+      console.log('[VideoList] Fetching videos with filters:', Object.fromEntries(params));
       const response = await api.get(`/videos?${params.toString()}`);
       const videosData = response.data || [];
       
@@ -101,8 +178,15 @@ function VideoList() {
       }
       
       setVideos(videosData);
+      console.log('[VideoList] Successfully fetched', videosData.length, 'videos');
     } catch (error) {
-      console.error('Failed to fetch videos:', error);
+      console.error('[VideoList] Failed to fetch videos:', error);
+      console.error('[VideoList] Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      setVideos([]); // Set empty array on error
     } finally {
       setLoading(false);
     }
@@ -114,8 +198,50 @@ function VideoList() {
     try {
       await api.delete(`/videos/${id}`);
       fetchVideos();
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     } catch (error) {
       alert('Failed to delete video');
+    }
+  };
+
+  const handleToggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === videos.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(videos.map((v) => v.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) {
+      alert('Please select at least one video to delete.');
+      return;
+    }
+    if (!confirm(`Delete ${selectedIds.size} selected video(s)? This cannot be undone.`)) return;
+    const ids = Array.from(selectedIds);
+    try {
+      await Promise.all(ids.map((id) => api.delete(`/videos/${id}`).catch((err) => ({ err, id }))));
+      setSelectedIds(new Set());
+      fetchVideos();
+    } catch (error) {
+      alert('Some videos could not be deleted. Check console for details.');
+      console.error('Bulk delete error:', error);
     }
   };
 
@@ -197,6 +323,22 @@ function VideoList() {
           <Search className="w-5 h-5 text-slate-600" />
           Filters
         </h2>
+        {/* Bulk actions */}
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <button
+            onClick={handleSelectAll}
+            className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors text-sm font-semibold"
+          >
+            {selectedIds.size === videos.length ? 'Deselect All' : 'Select All'}
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            disabled={selectedIds.size === 0}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg border border-red-700 hover:bg-red-700 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Delete Selected ({selectedIds.size})
+          </button>
+        </div>
         
         {/* Search Bar */}
         <div className="mb-6">
@@ -208,7 +350,10 @@ function VideoList() {
             <input
               type="text"
               value={filters.search || ''}
-              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFilters(prev => ({ ...prev, search: value }));
+              }}
               placeholder="Search by title, description, or video ID..."
               className="w-full pl-10 pr-3 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
             />
@@ -222,7 +367,10 @@ function VideoList() {
             </label>
             <select
               value={filters.subject || filters.course || ''}
-              onChange={(e) => setFilters({ ...filters, subject: e.target.value, course: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFilters(prev => ({ ...prev, subject: value, course: value }));
+              }}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Subjects</option>
@@ -239,7 +387,10 @@ function VideoList() {
             </label>
             <select
               value={filters.grade || ''}
-              onChange={(e) => setFilters({ ...filters, grade: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFilters(prev => ({ ...prev, grade: value }));
+              }}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Grades</option>
@@ -256,7 +407,10 @@ function VideoList() {
             </label>
             <select
               value={filters.unit || ''}
-              onChange={(e) => setFilters({ ...filters, unit: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFilters(prev => ({ ...prev, unit: value }));
+              }}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Units</option>
@@ -273,7 +427,10 @@ function VideoList() {
             </label>
             <select
               value={filters.lesson || ''}
-              onChange={(e) => setFilters({ ...filters, lesson: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFilters(prev => ({ ...prev, lesson: value }));
+              }}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Lessons</option>
@@ -290,7 +447,10 @@ function VideoList() {
             </label>
             <select
               value={filters.module || ''}
-              onChange={(e) => setFilters({ ...filters, module: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFilters(prev => ({ ...prev, module: value }));
+              }}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All Modules</option>
@@ -307,7 +467,10 @@ function VideoList() {
             </label>
             <select
               value={filters.status || 'active'}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFilters(prev => ({ ...prev, status: value }));
+              }}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >
               <option value="">All</option>
@@ -468,6 +631,12 @@ function VideoList() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 text-blue-600"
+                            checked={selectedIds.has(video.id)}
+                            onChange={() => handleToggleSelect(video.id)}
+                          />
                           <Link
                             to={`/stream/${video.video_id}`}
                             className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
@@ -585,13 +754,29 @@ function VideoList() {
                 className="bg-white rounded-2xl shadow-lg border-2 border-slate-200 overflow-hidden hover:shadow-2xl hover:border-blue-400 transition-all duration-300 group transform hover:-translate-y-2"
               >
                 {/* Thumbnail Section */}
-                <div className="relative w-full aspect-video bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-50 overflow-hidden p-4">
+                <div 
+                  className="relative w-full aspect-video bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-50 overflow-hidden p-4"
+                  onMouseEnter={() => {
+                    setHoveredVideoId(video.video_id);
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredVideoId(null);
+                    // Stop video when mouse leaves
+                    const videoElement = videoPreviewRefs[video.video_id];
+                    if (videoElement) {
+                      videoElement.pause();
+                      videoElement.currentTime = 0;
+                    }
+                  }}
+                >
                   {thumbnailUrl ? (
                     <div className="relative w-full h-full rounded-xl overflow-hidden border-2 border-white shadow-lg bg-white">
                       <img
                         src={thumbnailUrl}
                         alt={video.title}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                        className={`w-full h-full object-cover transition-opacity duration-300 ${
+                          hoveredVideoId === video.video_id ? 'opacity-0' : 'opacity-100'
+                        }`}
                         onError={(e) => {
                         // Try alternative extensions if first one fails
                         const currentSrc = e.target.src;
@@ -626,28 +811,38 @@ function VideoList() {
                     </div>
                   ) : null}
                   
+                  {/* Video Preview on Hover */}
+                  <VideoPreview 
+                    videoId={video.video_id} 
+                    isHovered={hoveredVideoId === video.video_id} 
+                  />
+                  
                   {/* Placeholder with Large Play Icon */}
-                  <div className={`thumbnail-placeholder absolute inset-4 flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border-2 border-slate-300 shadow-inner ${thumbnailUrl ? 'hidden' : 'flex'}`}>
+                  <div className={`thumbnail-placeholder absolute inset-4 flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border-2 border-slate-300 shadow-inner ${
+                    thumbnailUrl && hoveredVideoId !== video.video_id ? 'hidden' : 'flex'
+                  }`}>
                     <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center mb-3 shadow-md">
                       <Play className="w-10 h-10 text-blue-600 ml-1" fill="currentColor" />
                     </div>
                     <p className="text-sm text-blue-600 font-semibold">No Thumbnail</p>
                   </div>
 
-                  {/* Play Button Overlay (only on hover) */}
-                  <Link
-                    to={`/stream/${video.video_id}`}
-                    className="absolute inset-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 bg-black/40 backdrop-blur-sm rounded-xl"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-transform duration-300 border-4 border-white/80">
-                      <Play className="w-12 h-12 text-white ml-1" fill="currentColor" />
-                    </div>
-                  </Link>
+                  {/* Play Button Overlay (only on hover, but not when video preview is showing) */}
+                  {hoveredVideoId !== video.video_id && (
+                    <Link
+                      to={`/stream/${video.video_id}`}
+                      className="absolute inset-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 bg-black/40 backdrop-blur-sm rounded-xl z-10"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-2xl transform group-hover:scale-110 transition-transform duration-300 border-4 border-white/80">
+                        <Play className="w-12 h-12 text-white ml-1" fill="currentColor" />
+                      </div>
+                    </Link>
+                  )}
 
                   {/* Status Badge */}
                   {video.status === 'active' && (
-                    <div className="absolute top-6 right-6 z-10">
+                    <div className="absolute top-6 right-6 z-30">
                       <span className="px-3 py-1.5 text-xs rounded-full font-bold bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-xl border-2 border-white/80 backdrop-blur-sm">
                         Active
                       </span>
@@ -747,6 +942,15 @@ function VideoList() {
 
                   {/* Action Buttons */}
                   <div className="flex items-center gap-2.5 pt-4 border-t-2 border-slate-200">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 text-blue-600"
+                        checked={selectedIds.has(video.id)}
+                        onChange={() => handleToggleSelect(video.id)}
+                      />
+                      <span className="text-xs text-slate-600">Select</span>
+                    </label>
                     <Link
                       to={`/video/${video.video_id}`}
                       className="flex-1 flex items-center justify-center gap-1.5 px-4 py-3 bg-gradient-to-r from-blue-50 to-blue-100 text-blue-700 rounded-xl text-sm font-bold hover:from-blue-100 hover:to-blue-200 hover:text-blue-800 hover:shadow-lg transition-all duration-200 border-2 border-blue-300 transform hover:scale-105"

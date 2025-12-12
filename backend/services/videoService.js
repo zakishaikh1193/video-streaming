@@ -886,6 +886,8 @@ export async function getAllVideos(filters = {}) {
       unit: preserveValue(video.unit),
       lesson: preserveValue(video.lesson),
       module: moduleValue, // CRITICAL: Explicitly set module value
+      // Preserve version as string to maintain decimal values (e.g., 1.1, 1.2)
+      version: video.version !== null && video.version !== undefined ? String(video.version) : (video.version || null),
       description: video.description !== undefined ? video.description : null
     };
     

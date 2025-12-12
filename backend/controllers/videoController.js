@@ -1050,11 +1050,29 @@ export async function replaceVideoFile(req, res) {
       });
     }
     
-    console.log(`[Replace Video] ✓✓✓ Video successfully updated: ID ${updatedVideo.id}, Path: ${updatedVideo.file_path}, Size: ${updatedVideo.size}`);
+    // Verify the size was actually updated in the database
+    const actualFileSize = fsSync.statSync(targetFilePath).size;
+    const dbSize = updatedVideo.size || 0;
+    const sizeMatch = actualFileSize === dbSize;
+    
+    if (!sizeMatch) {
+      console.error(`[Replace Video] ⚠️ WARNING: Size mismatch! File size: ${actualFileSize} bytes, DB size: ${dbSize} bytes`);
+      // Try to update size again
+      try {
+        await videoService.updateVideo(id, { size: actualFileSize });
+        console.log(`[Replace Video] ✓ Size corrected in database: ${actualFileSize} bytes`);
+      } catch (sizeUpdateError) {
+        console.error(`[Replace Video] ✗ Failed to correct size:`, sizeUpdateError.message);
+      }
+    }
+    
+    console.log(`[Replace Video] ✓✓✓ Video successfully updated: ID ${updatedVideo.id}, Path: ${updatedVideo.file_path}, Size: ${updatedVideo.size} bytes (${(updatedVideo.size / 1024 / 1024).toFixed(2)} MB)`);
     console.log(`[Replace Video] ===== REPLACEMENT COMPLETE =====`);
     console.log(`[Replace Video] ✓ Video file replaced successfully`);
     console.log(`[Replace Video] ✓ File path updated: ${updatedVideo.file_path}`);
-    console.log(`[Replace Video] ✓ File size updated: ${updatedVideo.size} bytes`);
+    console.log(`[Replace Video] ✓ File size updated: ${updatedVideo.size} bytes (${(updatedVideo.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`[Replace Video] ✓ Actual file size: ${actualFileSize} bytes (${(actualFileSize / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`[Replace Video] ✓ Size match: ${sizeMatch ? 'YES' : 'NO'}`);
     console.log(`[Replace Video] ✓ Redirect slug preserved: ${redirectSlug}`);
     console.log(`[Replace Video] ✓ QR code preserved: ${qrUrl}`);
     console.log(`[Replace Video] ✓ Streaming URL: ${streamingUrl}`);

@@ -56,8 +56,10 @@ function AdminDashboard() {
       // Total videos = only active + inactive (exclude deleted videos)
       const totalVideosCount = activeVideos.length + inactiveVideos.length;
       
-      const totalSize = videos.reduce((sum, v) => sum + (v.size || 0), 0);
-      const totalDuration = videos.reduce((sum, v) => sum + (v.duration || 0), 0);
+      // Only count storage for active and inactive videos (exclude deleted)
+      const validVideos = videos.filter(v => v.status === 'active' || v.status === 'inactive');
+      const totalSize = validVideos.reduce((sum, v) => sum + (v.size || 0), 0);
+      const totalDuration = validVideos.reduce((sum, v) => sum + (v.duration || 0), 0);
       const videosWithCaptions = videos.filter(v => v.captions && v.captions.length > 0).length;
       const videosWithThumbnails = videos.filter(v => v.thumbnail_url).length;
 

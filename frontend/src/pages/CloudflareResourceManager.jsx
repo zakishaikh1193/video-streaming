@@ -399,6 +399,7 @@ function MyStorageManager() {
             unit: response.data?.video?.unit,
             lesson: response.data?.video?.lesson,
             module: response.data?.video?.module,
+            version: response.data?.video?.version,
             description: response.data?.video?.description
           });
 
@@ -417,6 +418,7 @@ function MyStorageManager() {
             unit: videoResponse.unit !== null && videoResponse.unit !== undefined ? videoResponse.unit : (item.unit || ''),
             lesson: videoResponse.lesson !== null && videoResponse.lesson !== undefined ? videoResponse.lesson : (item.lesson || ''),
             module: videoResponse.module !== null && videoResponse.module !== undefined ? videoResponse.module : (item.module || ''),
+            version: videoResponse.version !== null && videoResponse.version !== undefined ? videoResponse.version : (item.version || ''),
             status: videoResponse.status || item.status || 'active',
             description: videoResponse.description !== null && videoResponse.description !== undefined ? videoResponse.description : (item.description || ''),
             title: videoResponse.title || item.title || item.file?.name?.replace(/\.[^/.]+$/, '') || 'Screen Recording'
@@ -1145,7 +1147,7 @@ function MyStorageManager() {
                           <h5 className="text-base font-bold text-slate-900">Course Information</h5>
                         </div>
                         
-                        <div className="grid grid-cols-5 gap-3">
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                           {/* Subject */}
                           <div>
                             <div className="text-xs uppercase text-slate-500 mb-1.5">SUBJECT</div>
@@ -1191,6 +1193,17 @@ function MyStorageManager() {
                               {(() => {
                                 const moduleValue = item.module;
                                 return moduleValue !== null && moduleValue !== undefined && moduleValue !== '' && moduleValue !== 0 && moduleValue !== '0' ? String(moduleValue) : '-';
+                              })()}
+                            </div>
+                          </div>
+
+                          {/* Version */}
+                          <div>
+                            <div className="text-xs uppercase text-purple-700 mb-1.5">VERSION</div>
+                            <div className="w-full px-3 py-2.5 text-sm font-bold text-purple-900 bg-purple-50 border border-purple-200 rounded-lg text-center">
+                              {(() => {
+                                const versionValue = item.version;
+                                return versionValue !== null && versionValue !== undefined && versionValue !== '' && versionValue !== 0 && versionValue !== '0' ? String(versionValue) : '-';
                               })()}
                             </div>
                           </div>

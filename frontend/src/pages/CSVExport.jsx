@@ -7,13 +7,17 @@ function CSVExport() {
     subjects: [],
     grades: [],
     units: [],
-    lessons: []
+    lessons: [],
+    modules: [],
+    versions: []
   });
   const [selectedFilters, setSelectedFilters] = useState({
     subject: 'all',
     grade: 'all',
     unit: 'all',
-    lesson: 'all'
+    lesson: 'all',
+    module: 'all',
+    version: 'all'
   });
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -42,7 +46,9 @@ function CSVExport() {
           subjects: response.data.subjects || [],
           grades: response.data.grades || [],
           units: response.data.units || [],
-          lessons: response.data.lessons || []
+          lessons: response.data.lessons || [],
+          modules: response.data.modules || [],
+          versions: response.data.versions || []
         });
       }
     } catch (err) {
@@ -69,6 +75,12 @@ function CSVExport() {
       }
       if (selectedFilters.lesson !== 'all') {
         params.lesson = selectedFilters.lesson;
+      }
+      if (selectedFilters.module !== 'all') {
+        params.module = selectedFilters.module;
+      }
+      if (selectedFilters.version !== 'all') {
+        params.version = selectedFilters.version;
       }
 
       // Use the same endpoint logic as CSV export - get filtered videos
@@ -113,6 +125,12 @@ function CSVExport() {
       if (selectedFilters.lesson !== 'all') {
         params.lesson = selectedFilters.lesson;
       }
+      if (selectedFilters.module !== 'all') {
+        params.module = selectedFilters.module;
+      }
+      if (selectedFilters.version !== 'all') {
+        params.version = selectedFilters.version;
+      }
 
       // Download CSV
       const response = await api.get('/videos/export-filtered-csv', {
@@ -138,6 +156,12 @@ function CSVExport() {
       }
       if (selectedFilters.lesson !== 'all') {
         filename += `_lesson_${selectedFilters.lesson}`;
+      }
+      if (selectedFilters.module !== 'all') {
+        filename += `_module_${selectedFilters.module}`;
+      }
+      if (selectedFilters.version !== 'all') {
+        filename += `_version_${selectedFilters.version}`;
       }
       filename += `_${Date.now()}.csv`;
       
@@ -167,7 +191,9 @@ function CSVExport() {
       subject: 'all',
       grade: 'all',
       unit: 'all',
-      lesson: 'all'
+      lesson: 'all',
+      module: 'all',
+      version: 'all'
     });
   };
 
@@ -193,7 +219,7 @@ function CSVExport() {
             </div>
             <div>
               <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">CSV Export</h1>
-              <p className="text-slate-600 text-base sm:text-lg">Export videos to CSV with filters by Subject, Grade, Unit, and Lesson</p>
+              <p className="text-slate-600 text-base sm:text-lg">Export videos to CSV with filters by Subject, Grade, Unit, Lesson, Module, and Version</p>
             </div>
           </div>
         </div>
@@ -214,7 +240,7 @@ function CSVExport() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-6">
             {/* Subject Filter */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -314,6 +340,66 @@ function CSVExport() {
                   ))}
               </select>
             </div>
+
+            {/* Module Filter */}
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">
+                Module
+              </label>
+              <select
+                value={selectedFilters.module}
+                onChange={(e) => handleFilterChange('module', e.target.value)}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+              >
+                <option value="all">All Modules</option>
+                {filterValues.modules
+                  .filter(m => m !== null && m !== undefined && String(m).trim() !== '')
+                  .sort((a, b) => {
+                    // Try to sort numerically first, then alphabetically
+                    const numA = Number(a);
+                    const numB = Number(b);
+                    if (!isNaN(numA) && !isNaN(numB)) {
+                      return numA - numB;
+                    }
+                    return String(a).localeCompare(String(b));
+                  })
+                  .map((module) => (
+                    <option key={module} value={module}>
+                      Module {module}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {/* Version Filter */}
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">
+                Version
+              </label>
+              <select
+                value={selectedFilters.version}
+                onChange={(e) => handleFilterChange('version', e.target.value)}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+              >
+                <option value="all">All Versions</option>
+                {filterValues.versions
+                  .filter(v => v !== null && v !== undefined && String(v).trim() !== '')
+                  .sort((a, b) => {
+                    // Sort versions numerically (handles floating point)
+                    const numA = parseFloat(a);
+                    const numB = parseFloat(b);
+                    if (!isNaN(numA) && !isNaN(numB)) {
+                      return numA - numB;
+                    }
+                    return String(a).localeCompare(String(b));
+                  })
+                  .map((version) => (
+                    <option key={version} value={version}>
+                      Version {version}
+                    </option>
+                  ))}
+              </select>
+            </div>
           </div>
 
           {/* Filter Summary and Actions */}
@@ -331,7 +417,7 @@ function CSVExport() {
                   </span>
                 )}
               </div>
-              {(selectedFilters.subject !== 'all' || selectedFilters.grade !== 'all' || selectedFilters.unit !== 'all' || selectedFilters.lesson !== 'all') && (
+              {(selectedFilters.subject !== 'all' || selectedFilters.grade !== 'all' || selectedFilters.unit !== 'all' || selectedFilters.lesson !== 'all' || selectedFilters.module !== 'all' || selectedFilters.version !== 'all') && (
                 <button
                   onClick={resetFilters}
                   className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-semibold text-sm"

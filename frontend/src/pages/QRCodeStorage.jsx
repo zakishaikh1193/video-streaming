@@ -52,18 +52,22 @@ function QRCodeStorage() {
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [showDiagnostic, setShowDiagnostic] = useState(false);
   
-  // Filter options (Subject, Grade, Unit, Lesson)
+  // Filter options (Subject, Grade, Unit, Lesson, Module, Version)
   const [filterOptions, setFilterOptions] = useState({
     subjects: [],
     grades: [],
     units: [],
-    lessons: []
+    lessons: [],
+    modules: [],
+    versions: []
   });
   const [selectedFilters, setSelectedFilters] = useState({
     subject: 'all',
     grade: 'all',
     unit: 'all',
-    lesson: 'all'
+    lesson: 'all',
+    module: 'all',
+    version: 'all'
   });
   
   // Selection for bulk download
@@ -132,7 +136,9 @@ function QRCodeStorage() {
           subjects: response.data.subjects || [],
           grades: response.data.grades || [],
           units: response.data.units || [],
-          lessons: response.data.lessons || []
+          lessons: response.data.lessons || [],
+          modules: response.data.modules || [],
+          versions: response.data.versions || []
         });
       }
     } catch (err) {
@@ -153,11 +159,12 @@ function QRCodeStorage() {
         item.grade?.toString().includes(term) ||
         item.lesson?.toLowerCase().includes(term) ||
         item.module?.toLowerCase().includes(term) ||
+        item.version?.toString().includes(term) ||
         item.shortSlug?.toLowerCase().includes(term)
       );
     }
 
-    // Apply Subject, Grade, Unit, Lesson filters
+    // Apply Subject, Grade, Unit, Lesson, Module, Version filters
     if (selectedFilters.subject !== 'all') {
       filtered = filtered.filter(item => {
         const itemSubject = item.subject || item.course || '';
@@ -177,6 +184,16 @@ function QRCodeStorage() {
     if (selectedFilters.lesson !== 'all') {
       filtered = filtered.filter(item => {
         return String(item.lesson || '') === String(selectedFilters.lesson);
+      });
+    }
+    if (selectedFilters.module !== 'all') {
+      filtered = filtered.filter(item => {
+        return String(item.module || '') === String(selectedFilters.module);
+      });
+    }
+    if (selectedFilters.version !== 'all') {
+      filtered = filtered.filter(item => {
+        return String(item.version || '') === String(selectedFilters.version);
       });
     }
 
@@ -235,28 +252,44 @@ function QRCodeStorage() {
       
       setDownloadingIds(prev => new Set(prev).add(videoId));
       
-      const response = await api.get(`/videos/${videoId}/qr-download`, {
-        responseType: 'blob',
-        timeout: 30000 // 30 second timeout
-      });
-      
-      if (!response.data || response.data.size === 0) {
-        throw new Error('Empty response from server');
+      // Find the SVG element in the displayed QR code
+      // The QRCodeViewer component renders an SVG with QRCodeSVG
+      const cardElement = document.querySelector(`[data-video-id="${videoId}"]`);
+      if (!cardElement) {
+        throw new Error('QR code element not found on page');
       }
       
-      // Generate filename from Grade + Unit + Lesson + Module in format G1_U1_L1_M1.png
-      // Order: Grade, Unit, Lesson, Module (G_U_L_M)
+      // Find the SVG element inside the card
+      const svgElement = cardElement.querySelector('svg');
+      if (!svgElement) {
+        throw new Error('SVG QR code not found');
+      }
+      
+      // Clone the SVG to avoid modifying the original
+      const clonedSvg = svgElement.cloneNode(true);
+      
+      // Get the SVG as a string
+      const svgString = new XMLSerializer().serializeToString(clonedSvg);
+      
+      // Generate filename from Grade + Unit + Lesson + Module + Version in format G1_U1_L1_M1_V1.1.svg
+      // Order: Grade, Unit, Lesson, Module, Version (G_U_L_M_V)
+      // Version is critical to differentiate between videos with same metadata but different versions
       const parts = [];
       if (videoData?.grade) parts.push(`G${videoData.grade}`);
       if (videoData?.unit) parts.push(`U${videoData.unit}`); // Use unit field for U prefix
       if (videoData?.lesson) parts.push(`L${videoData.lesson}`);
       if (videoData?.module) parts.push(`M${videoData.module}`);
+      if (videoData?.version) parts.push(`V${videoData.version}`); // Add version to differentiate
       
       const filename = parts.length > 0 
-        ? parts.join('_') + '.png'
-        : `${videoId}_qr_code.png`;
+        ? parts.join('_') + '.svg'
+        : `${videoId}_qr_code.svg`;
       
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      // Create blob with SVG content
+      const blob = new Blob([svgString], { type: 'image/svg+xml' });
+      const url = window.URL.createObjectURL(blob);
+      
+      // Create download link
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', filename);
@@ -264,20 +297,13 @@ function QRCodeStorage() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
+      
       console.log('QR code downloaded successfully as:', filename);
     } catch (err) {
       console.error('Failed to download QR code:', err);
       let errorMessage = 'Unknown error';
       
-      if (err.response?.status === 404) {
-        errorMessage = 'QR code file not found. It will be generated automatically on next request.';
-      } else if (err.response?.status === 401) {
-        errorMessage = 'Authentication required. Please log in again.';
-      } else if (err.response?.status === 403) {
-        errorMessage = 'Access forbidden. You do not have permission to download QR codes.';
-      } else if (err.response?.status >= 500) {
-        errorMessage = 'Server error. Please try again later.';
-      } else if (err.message) {
+      if (err.message) {
         errorMessage = err.message;
       } else if (err.response?.data?.message) {
         errorMessage = err.response.data.message;
@@ -319,31 +345,45 @@ function QRCodeStorage() {
   // Helper function to download a single QR code to a file handle
   const downloadQRToFile = async (videoId, videoData, fileHandle) => {
     try {
-      const response = await api.get(`/videos/${videoId}/qr-download`, {
-        responseType: 'blob',
-        timeout: 30000
-      });
-      
-      if (!response.data || response.data.size === 0) {
-        throw new Error('Empty response from server');
+      // Find the SVG element in the displayed QR code
+      const cardElement = document.querySelector(`[data-video-id="${videoId}"]`);
+      if (!cardElement) {
+        throw new Error('QR code element not found on page');
       }
       
-      // Generate filename from Grade + Unit + Lesson + Module in format G1_U1_L1_M1.png
-      // Order: Grade, Unit, Lesson, Module (G_U_L_M)
+      // Find the SVG element inside the card
+      const svgElement = cardElement.querySelector('svg');
+      if (!svgElement) {
+        throw new Error('SVG QR code not found');
+      }
+      
+      // Clone the SVG to avoid modifying the original
+      const clonedSvg = svgElement.cloneNode(true);
+      
+      // Get the SVG as a string
+      const svgString = new XMLSerializer().serializeToString(clonedSvg);
+      
+      // Generate filename from Grade + Unit + Lesson + Module + Version in format G1_U1_L1_M1_V1.1.svg
+      // Order: Grade, Unit, Lesson, Module, Version (G_U_L_M_V)
+      // Version is critical to differentiate between videos with same metadata but different versions
       const parts = [];
       if (videoData?.grade) parts.push(`G${videoData.grade}`);
       if (videoData?.unit) parts.push(`U${videoData.unit}`); // Use unit field for U prefix
       if (videoData?.lesson) parts.push(`L${videoData.lesson}`);
       if (videoData?.module) parts.push(`M${videoData.module}`);
+      if (videoData?.version) parts.push(`V${videoData.version}`); // Add version to differentiate
       
       const filename = parts.length > 0 
-        ? parts.join('_') + '.png'
-        : `${videoId}_qr_code.png`;
+        ? parts.join('_') + '.svg'
+        : `${videoId}_qr_code.svg`;
+      
+      // Create blob with SVG content
+      const blob = new Blob([svgString], { type: 'image/svg+xml' });
       
       // Create file in the selected folder
       const file = await fileHandle.getFileHandle(filename, { create: true });
       const writable = await file.createWritable();
-      await writable.write(response.data);
+      await writable.write(blob);
       await writable.close();
       
       return filename;
@@ -369,6 +409,8 @@ function QRCodeStorage() {
                         selectedFilters.grade !== 'all' || 
                         selectedFilters.unit !== 'all' ||
                         selectedFilters.lesson !== 'all' ||
+                        selectedFilters.module !== 'all' ||
+                        selectedFilters.version !== 'all' ||
                         searchTerm.trim() !== '';
       
       if (hasFilters) {
@@ -503,6 +545,8 @@ function QRCodeStorage() {
                       selectedFilters.grade !== 'all' || 
                       selectedFilters.unit !== 'all' ||
                       selectedFilters.lesson !== 'all' ||
+                      selectedFilters.module !== 'all' ||
+                      selectedFilters.version !== 'all' ||
                       searchTerm.trim() !== '';
     
     if (hasFilters) {
@@ -599,8 +643,8 @@ function QRCodeStorage() {
               />
             </div>
 
-            {/* Subject, Grade, Unit, Lesson Filters */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Subject, Grade, Unit, Lesson, Module, Version Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               {/* Subject Filter */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -687,6 +731,62 @@ function QRCodeStorage() {
                     ))}
                 </select>
               </div>
+
+              {/* Module Filter */}
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Module
+                </label>
+                <select
+                  value={selectedFilters.module}
+                  onChange={(e) => setSelectedFilters(prev => ({ ...prev, module: e.target.value }))}
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+                >
+                  <option value="all">All Modules</option>
+                  {filterOptions.modules
+                    .filter(m => m !== null && m !== undefined && String(m).trim() !== '')
+                    .sort((a, b) => {
+                      // Try to sort numerically first, then alphabetically
+                      const numA = Number(a);
+                      const numB = Number(b);
+                      if (!isNaN(numA) && !isNaN(numB)) {
+                        return numA - numB;
+                      }
+                      return String(a).localeCompare(String(b));
+                    })
+                    .map(module => (
+                      <option key={module} value={module}>Module {module}</option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Version Filter */}
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Version
+                </label>
+                <select
+                  value={selectedFilters.version}
+                  onChange={(e) => setSelectedFilters(prev => ({ ...prev, version: e.target.value }))}
+                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
+                >
+                  <option value="all">All Versions</option>
+                  {filterOptions.versions
+                    .filter(v => v !== null && v !== undefined && String(v).trim() !== '')
+                    .sort((a, b) => {
+                      // Sort versions numerically (handles floating point)
+                      const numA = parseFloat(a);
+                      const numB = parseFloat(b);
+                      if (!isNaN(numA) && !isNaN(numB)) {
+                        return numA - numB;
+                      }
+                      return String(a).localeCompare(String(b));
+                    })
+                    .map(version => (
+                      <option key={version} value={version}>Version {version}</option>
+                    ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -751,6 +851,14 @@ function QRCodeStorage() {
                   onClick={() => {
                     setSearchTerm('');
                     setSelectedFilter('all');
+                    setSelectedFilters({
+                      subject: 'all',
+                      grade: 'all',
+                      unit: 'all',
+                      lesson: 'all',
+                      module: 'all',
+                      version: 'all'
+                    });
                   }}
                   className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all font-semibold shadow-lg hover:shadow-xl"
                 >
@@ -762,7 +870,8 @@ function QRCodeStorage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 lg:gap-8">
             {filteredQrCodes.map((item) => (
               <div
-                key={item.videoId}
+                key={`${item.videoId}_${item.version || 'no-version'}_${item.shortSlug || ''}`}
+                data-video-id={item.videoId}
                 className="bg-white rounded-2xl shadow-lg border-2 border-slate-200 p-5 sm:p-6 hover:shadow-2xl transition-all duration-300 hover:border-blue-400 transform hover:-translate-y-1 group"
               >
                 {/* Selection Checkbox */}
@@ -806,6 +915,11 @@ function QRCodeStorage() {
                     {item.lesson && (
                       <span className="px-3 py-1.5 bg-gradient-to-r from-purple-50 to-purple-100 text-purple-700 rounded-lg text-xs font-bold border border-purple-300 shadow-sm">
                         {item.lesson}
+                      </span>
+                    )}
+                    {item.version && (
+                      <span className="px-3 py-1.5 bg-gradient-to-r from-orange-50 to-orange-100 text-orange-700 rounded-lg text-xs font-bold border border-orange-300 shadow-sm">
+                        V{item.version}
                       </span>
                     )}
                   </div>

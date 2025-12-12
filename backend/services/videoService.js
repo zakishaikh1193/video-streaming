@@ -210,6 +210,23 @@ export async function createVideo(videoData) {
       // Add language, file paths, etc.
       columns.push('language', 'file_path', 'streaming_url', 'qr_url', 'thumbnail_url', 'redirect_slug', 'duration', 'size', 'version');
       placeholders.push('?', '?', '?', '?', '?', '?', '?', '?', '?');
+      
+      // Preserve version exactly as provided (e.g., "1.00" stays "1.00")
+      // Convert to number for database storage, but preserve decimal precision
+      let versionValue = null;
+      if (version !== undefined && version !== null && version !== '') {
+        const versionStr = String(version).trim();
+        if (versionStr !== '') {
+          // Parse to number to store in DECIMAL column, but preserve original string format
+          const versionNum = parseFloat(versionStr);
+          versionValue = isNaN(versionNum) ? null : versionNum; // Store as number for DECIMAL column
+        }
+      }
+      // Only default to 1 if version was not provided at all
+      if (versionValue === null && (version === undefined || version === null || version === '')) {
+        versionValue = 1; // Default only when version is not provided
+      }
+      
       values.push(
         language || 'en',
         filePath || null, 
@@ -219,7 +236,7 @@ export async function createVideo(videoData) {
         redirectSlug || null, 
         duration || 0, 
         size || 0, 
-        version || 1
+        versionValue
       );
       
       // Add status if column exists
@@ -333,7 +350,14 @@ export async function createVideo(videoData) {
             redirectSlug || null, 
             duration || 0, 
             size || 0, 
-            version || 1, 
+            (version !== undefined && version !== null && version !== '') 
+              ? (() => {
+                  const versionStr = String(version).trim();
+                  if (versionStr === '') return 1;
+                  const versionNum = parseFloat(versionStr);
+                  return isNaN(versionNum) ? 1 : versionNum;
+                })()
+              : 1, 
             status || 'active'
           ];
           
@@ -603,7 +627,7 @@ export async function getAllVideos(filters = {}) {
   // Add optional columns only if they exist
   const optionalColumns = [
     'partner_id', 'description', 'language', 'file_path', 'streaming_url',
-    'qr_url', 'thumbnail_url', 'redirect_slug', 'duration', 'size', 'version',
+    'qr_url', 'thumbnail_url', 'redirect_slug', 'duration', 'size',
     'views', 'status', 'created_at', 'updated_at', 'grade', 'lesson', 'topic'
   ];
   
@@ -611,6 +635,13 @@ export async function getAllVideos(filters = {}) {
     if (columnChecks[col]) {
       selectColumns.push(col);
     }
+  }
+  
+  // Add version with explicit CAST to preserve decimal values (e.g., 1.1, 1.2)
+  // This ensures MySQL returns the version with decimal precision
+  if (columnChecks['version']) {
+    selectColumns.push('CAST(version AS DECIMAL(10,2)) as version');
+    console.log('[getAllVideos] ✓ Adding version column with DECIMAL cast to preserve decimal values');
   }
   
   // CRITICAL: Add subject/course/module/unit if they exist - these are essential for display
@@ -886,6 +917,37 @@ export async function getAllVideos(filters = {}) {
       unit: preserveValue(video.unit),
       lesson: preserveValue(video.lesson),
       module: moduleValue, // CRITICAL: Explicitly set module value
+      // Format version to show decimals without trailing zeros (e.g., 1.1, 1.2, 1.3)
+      // Display format: 1.1, 1.2, 1.3 (not 1.10, 1.20, 1.30)
+      version: video.version !== null && video.version !== undefined 
+        ? (() => {
+            // If it's a number (from MySQL DECIMAL), format to remove trailing zeros
+            if (typeof video.version === 'number') {
+              // Check if it's a whole number (e.g., 1, 2, 3)
+              if (Number.isInteger(video.version)) {
+                // For whole numbers, return as string (e.g., "1", "2")
+                return String(video.version);
+              }
+              // For decimal numbers, format to remove trailing zeros
+              // Use toFixed(2) to ensure precision, then remove trailing zeros
+              // e.g., 1.00 -> "1", 1.10 -> "1.1", 1.20 -> "1.2", 1.12 -> "1.12"
+              return video.version.toFixed(2).replace(/\.?0+$/, '');
+            }
+            // If it's already a string, parse and format to remove trailing zeros
+            const str = String(video.version).trim();
+            if (str === '') return null;
+            // Try to parse as number to normalize format
+            const num = parseFloat(str);
+            if (!isNaN(num)) {
+              if (Number.isInteger(num)) {
+                return String(num);
+              }
+              return num.toFixed(2).replace(/\.?0+$/, '');
+            }
+            // If can't parse, return as-is
+            return str;
+          })()
+        : (video.version || null),
       description: video.description !== undefined ? video.description : null
     };
     
@@ -900,6 +962,9 @@ export async function getAllVideos(filters = {}) {
         grade: video.grade,
         unit: video.unit,
         lesson: video.lesson,
+        version: video.version,
+        versionType: typeof video.version,
+        versionRaw: video.version,
         hasSubject: 'subject' in video,
         hasModule: 'module' in video,
         allKeys: Object.keys(video)
@@ -911,7 +976,9 @@ export async function getAllVideos(filters = {}) {
         module: result.module,
         unit: result.unit,
         grade: result.grade,
-        lesson: result.lesson
+        lesson: result.lesson,
+        version: result.version,
+        versionType: typeof result.version
       });
     }
     

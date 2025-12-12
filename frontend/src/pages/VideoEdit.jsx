@@ -10,6 +10,7 @@ function VideoEdit() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [newVideoFile, setNewVideoFile] = useState(null);
@@ -140,6 +141,8 @@ function VideoEdit() {
         return;
       }
       setNewVideoFile(file);
+      setUploadProgress(0);
+      setUploadingVideo(false);
       setError('');
       setSuccess('');
     }
@@ -147,6 +150,8 @@ function VideoEdit() {
 
   const handleRemoveFile = () => {
     setNewVideoFile(null);
+    setUploadProgress(0);
+    setUploadingVideo(false);
     const fileInput = document.getElementById('video-file-input');
     if (fileInput) {
       fileInput.value = '';
@@ -163,6 +168,7 @@ function VideoEdit() {
       // If new video file is selected, replace the video first
       if (newVideoFile) {
         setUploadingVideo(true);
+        setUploadProgress(0);
         const replaceFormData = new FormData();
         replaceFormData.append('video', newVideoFile);
 
@@ -170,19 +176,29 @@ function VideoEdit() {
           const replaceResponse = await api.post(`/videos/${id}/replace-video`, replaceFormData, {
             headers: {
               'Content-Type': 'multipart/form-data'
+            },
+            onUploadProgress: (progressEvent) => {
+              if (progressEvent.total) {
+                const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                setUploadProgress(percentCompleted);
+              }
             }
           });
 
           if (replaceResponse.data.success) {
+            setUploadProgress(100);
             setSuccess('Video file replaced successfully!');
             // Show popup and then redirect to videos page
-            alert('Video file replaced successfully!');
-            navigate('/admin/videos');
+            setTimeout(() => {
+              alert('Video file replaced successfully!');
+              navigate('/admin/videos');
+            }, 500);
             return;
           }
         } catch (replaceErr) {
           setError(replaceErr.response?.data?.error || 'Failed to replace video file');
           setUploadingVideo(false);
+          setUploadProgress(0);
           setSaving(false);
           return;
         }
@@ -565,27 +581,57 @@ function VideoEdit() {
                       />
                     </label>
                   ) : (
-                    <div className="p-4 bg-green-50 border-2 border-green-200 rounded-xl">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <FileVideo className="w-8 h-8 text-green-600" />
-                          <div>
-                            <p className="font-semibold text-slate-900" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
-                              {newVideoFile.name}
-                            </p>
-                            <p className="text-sm text-slate-600" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
-                              {formatFileSize(newVideoFile.size)}
-                            </p>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-green-50 border-2 border-green-200 rounded-xl">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <FileVideo className="w-8 h-8 text-green-600" />
+                            <div>
+                              <p className="font-semibold text-slate-900" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+                                {newVideoFile.name}
+                              </p>
+                              <p className="text-sm text-slate-600" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+                                {formatFileSize(newVideoFile.size)}
+                              </p>
+                            </div>
                           </div>
+                          {!uploadingVideo && (
+                            <button
+                              type="button"
+                              onClick={handleRemoveFile}
+                              className="p-2 text-red-600 hover:bg-red-100 rounded-xl transition-colors"
+                            >
+                              <X className="w-5 h-5" />
+                            </button>
+                          )}
                         </div>
-                        <button
-                          type="button"
-                          onClick={handleRemoveFile}
-                          className="p-2 text-red-600 hover:bg-red-100 rounded-xl transition-colors"
-                        >
-                          <X className="w-5 h-5" />
-                        </button>
                       </div>
+                      
+                      {/* Upload Progress Bar */}
+                      {uploadingVideo && uploadProgress > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-semibold text-slate-700">Uploading video...</span>
+                            <span className="font-bold text-blue-600">{uploadProgress}%</span>
+                          </div>
+                          <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-300 ${
+                                uploadProgress === 100
+                                  ? 'bg-gradient-to-r from-green-500 to-emerald-500'
+                                  : 'bg-gradient-to-r from-blue-500 to-indigo-500'
+                              }`}
+                              style={{ width: `${uploadProgress}%` }}
+                            />
+                          </div>
+                          {uploadProgress === 100 && (
+                            <div className="flex items-center gap-2 text-sm text-green-600">
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>Upload complete! Saving changes...</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -36,7 +36,8 @@ export async function createRedirect(slug, targetUrl, useShortUrl = true) {
   return {
     insertId: result.insertId,
     shortSlug,
-    shortUrl: `${config.urls.base}/${shortSlug}`
+    // Use frontend URL for QR/short link so it matches what users see and scan
+    shortUrl: `${config.urls.frontend}/${shortSlug}`
   };
 }
 

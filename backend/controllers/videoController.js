@@ -545,6 +545,7 @@ export async function uploadVideo(req, res) {
       description,
       language = 'en',
       status = 'active',
+      version,
       videoId: requestedVideoId,
       plannedPath
     } = req.body;
@@ -736,6 +737,12 @@ export async function uploadVideo(req, res) {
     });
     console.log('[Upload Video] =================================');
     
+    // Preserve version exactly as provided (e.g., "1.00" stays "1.00", not converted to number)
+    // Convert to string to preserve decimal places and trailing zeros
+    const versionValue = (version !== undefined && version !== null && String(version).trim() !== '')
+      ? String(version).trim() // Preserve exact string value (e.g., "1.00", "1.1", "1.2")
+      : null; // Don't default to 1 - let database handle default if needed
+    
     let videoData = {
       videoId,
       title: title || videoId,
@@ -748,6 +755,7 @@ export async function uploadVideo(req, res) {
       module: safeStringValue(module),
       activity: safeStringValue(activity),
       topic: safeStringValue(topic),
+      version: versionValue, // Preserve exact version string (e.g., "1.00")
       filePath: relativePath, // Relative path: upload/filename.mp4
       streamingUrl,
       qrUrl,

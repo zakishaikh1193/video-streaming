@@ -363,6 +363,8 @@ function VideoList() {
           unitType: typeof sampleVideo.unit,
           lessonType: typeof sampleVideo.lesson,
           moduleType: typeof sampleVideo.module,
+          version: sampleVideo.version,
+          versionType: typeof sampleVideo.version,
           // Show all available keys
           allKeys: Object.keys(sampleVideo),
           // Show raw values for debugging
@@ -371,7 +373,8 @@ function VideoList() {
           rawGrade: sampleVideo.grade,
           rawUnit: sampleVideo.unit,
           rawLesson: sampleVideo.lesson,
-          rawModule: sampleVideo.module
+          rawModule: sampleVideo.module,
+          rawVersion: sampleVideo.version
         });
       }
       
@@ -1257,7 +1260,7 @@ function VideoList() {
                     <div className="flex items-center gap-1 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg">
                       <span className="font-semibold text-slate-700">Version:</span>
                       <span className="font-bold text-slate-900">
-                        {video.version !== null && video.version !== undefined && video.version !== '' ? video.version : '-'}
+                        {video.version !== null && video.version !== undefined && video.version !== '' ? String(video.version) : '-'}
                       </span>
                     </div>
                     <span className="text-slate-400">•</span>

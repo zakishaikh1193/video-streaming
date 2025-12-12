@@ -510,6 +510,9 @@ export async function getVideoById(id) {
     unit: preserveValue(video.unit),
     lesson: preserveValue(video.lesson),
     module: preserveValue(video.module),
+    // Explicitly preserve size and duration fields (file size in bytes, duration in seconds)
+    size: video.size !== null && video.size !== undefined ? Number(video.size) : (video.size || 0),
+    duration: video.duration !== null && video.duration !== undefined ? Number(video.duration) : (video.duration || 0),
     description: video.description !== undefined ? video.description : null
   };
   
@@ -521,6 +524,9 @@ export async function getVideoById(id) {
     unit: result.unit,
     grade: result.grade,
     lesson: result.lesson,
+    size: result.size,
+    sizeMB: result.size ? (result.size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A',
+    sizeType: typeof result.size,
     rawSubject: video.subject,
     rawModule: video.module,
     rawCourse: video.course
@@ -917,6 +923,10 @@ export async function getAllVideos(filters = {}) {
       unit: preserveValue(video.unit),
       lesson: preserveValue(video.lesson),
       module: moduleValue, // CRITICAL: Explicitly set module value
+      // Explicitly preserve size field (file size in bytes)
+      size: video.size !== null && video.size !== undefined ? Number(video.size) : (video.size || 0),
+      // Explicitly preserve duration field (duration in seconds)
+      duration: video.duration !== null && video.duration !== undefined ? Number(video.duration) : (video.duration || 0),
       // Format version to show decimals without trailing zeros (e.g., 1.1, 1.2, 1.3)
       // Display format: 1.1, 1.2, 1.3 (not 1.10, 1.20, 1.30)
       version: video.version !== null && video.version !== undefined 
@@ -978,7 +988,10 @@ export async function getAllVideos(filters = {}) {
         grade: result.grade,
         lesson: result.lesson,
         version: result.version,
-        versionType: typeof result.version
+        versionType: typeof result.version,
+        size: result.size,
+        sizeType: typeof result.size,
+        sizeMB: result.size ? (result.size / 1024 / 1024).toFixed(2) + ' MB' : '0 MB'
       });
     }
     
@@ -1190,7 +1203,7 @@ export async function updateVideo(id, updates) {
   const allowedFields = [
     'title', 'description', 'language', 'status',
     'subject', 'course', 'grade', 'unit', 'lesson', 'module', 'version',
-    'streaming_url', 'file_path', 'thumbnail_url'
+    'streaming_url', 'file_path', 'thumbnail_url', 'size', 'duration'
   ];
   
   // Check which columns exist
@@ -1242,7 +1255,7 @@ export async function updateVideo(id, updates) {
       // Convert value to string and preserve non-empty values
       // Special handling: preserve actual values including "0", "1", etc.
       // CRITICAL: Empty strings should be explicitly set to NULL in database
-      // Special handling for version: support floating point numbers
+      // Special handling for version, size, and duration: support numbers
       let processedValue;
       if (value === null || value === undefined || value === '') {
         processedValue = null;
@@ -1255,6 +1268,14 @@ export async function updateVideo(id, updates) {
           // If not a valid number, convert to string
           const str = String(value).trim();
           processedValue = str !== '' ? str : null;
+        }
+      } else if (key === 'size' || key === 'duration') {
+        // For size and duration, always treat as numbers (bytes and seconds)
+        const numValue = typeof value === 'number' ? value : parseInt(value, 10);
+        if (!isNaN(numValue) && isFinite(numValue)) {
+          processedValue = numValue; // Keep as number for database
+        } else {
+          processedValue = null; // Invalid number, set to NULL
         }
       } else {
         const str = String(value).trim();

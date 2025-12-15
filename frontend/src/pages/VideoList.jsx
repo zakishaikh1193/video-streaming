@@ -227,7 +227,8 @@ function VideoPreview({ videoId, isHovered }) {
 function VideoList() {
   const location = useLocation();
   const isInactiveRoute = location.pathname === '/admin/videos/inactive';
-  
+  const FILTERS_STORAGE_KEY = 'video_list_filters_v1';
+
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('card'); // 'card' or 'list'
@@ -240,7 +241,8 @@ function VideoList() {
     modules: [],
     versions: []
   });
-  const [filters, setFilters] = useState({
+
+  const defaultFilters = {
     search: '',
     subject: '',
     course: '', // Keep for backward compatibility
@@ -251,12 +253,34 @@ function VideoList() {
     moduleNumber: '',
     version: '',
     status: isInactiveRoute ? 'inactive' : 'active'
+  };
+
+  const [filters, setFilters] = useState(() => {
+    try {
+      const raw = localStorage.getItem(FILTERS_STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        return { ...defaultFilters, ...saved, status: defaultFilters.status };
+      }
+    } catch {
+      // ignore parse errors and fall back to defaults
+    }
+    return defaultFilters;
   });
   const [diagnosticData, setDiagnosticData] = useState(null);
   const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
   const [hoveredVideoId, setHoveredVideoId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
+
+  // Persist filters so they survive navigation/back
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters));
+    } catch {
+      // ignore storage errors
+    }
+  }, [filters]);
 
   // Derive initials and a consistent gradient from the title for thumbnail fallbacks
   const getTitleInitials = (title) => {
@@ -577,10 +601,22 @@ function VideoList() {
 
         {/* Filters Section */}
         <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 mb-6">
-        <h2 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-          <Search className="w-5 h-5 text-slate-600" />
-          Filters
-        </h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <Search className="w-5 h-5 text-slate-600" />
+            Filters
+          </h2>
+          <button
+            type="button"
+            onClick={() => {
+              setFilters(defaultFilters);
+              setSelectedIds(new Set());
+            }}
+            className="px-3 py-1.5 text-xs font-semibold rounded-full border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            Clear filters
+          </button>
+        </div>
         {/* Bulk actions */}
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <button

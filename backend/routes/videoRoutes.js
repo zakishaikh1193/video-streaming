@@ -37,6 +37,18 @@ router.use((req, res, next) => {
 router.get('/', videoController.getAllVideos);
 router.get('/filters', videoController.getFilterValues);
 
+// Get video by database ID (protected route) - MUST be before /:videoId routes
+router.get('/by-id/:id', (req, res, next) => {
+  console.log('[VideoRouter] /by-id/:id route matched!', {
+    id: req.params.id,
+    method: req.method,
+    path: req.path,
+    url: req.url,
+    hasAuth: !!req.headers.authorization
+  });
+  next();
+}, authenticateToken, videoController.getVideoById);
+
 // Increment video views (public endpoint - no auth required)
 router.post('/:videoId/increment-views', videoController.incrementVideoViews);
 
@@ -366,7 +378,6 @@ router.get('/:videoId/stream', async (req, res, next) => {
   }
 });
 
-router.get('/by-id/:id', authenticateToken, videoController.getVideoById);
 router.get('/diagnostic/:id', authenticateToken, videoController.getVideoMetadataDiagnostic);
 router.post('/diagnostic/:id/quick-fix', authenticateToken, videoController.quickFixVideoMetadata);
 router.put('/:id', authenticateToken, videoController.updateVideo);

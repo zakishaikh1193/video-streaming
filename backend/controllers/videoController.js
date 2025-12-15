@@ -480,7 +480,19 @@ export async function getAllVideos(req, res) {
 export async function getVideo(req, res) {
   try {
     const { videoId } = req.params;
-    const video = await videoService.getVideoByVideoId(videoId);
+    
+    // Try to get video by video_id first (most common case)
+    let video = await videoService.getVideoByVideoId(videoId);
+    
+    // If not found and videoId is numeric, try getting by database ID (for backward compatibility)
+    if (!video && /^\d+$/.test(videoId)) {
+      video = await videoService.getVideoById(parseInt(videoId, 10));
+      // Only return if video is active (public endpoint should not return inactive videos)
+      if (video && video.status !== 'active') {
+        video = null;
+      }
+    }
+    
     if (!video) {
       return res.status(404).json({ error: 'Video not found' });
     }

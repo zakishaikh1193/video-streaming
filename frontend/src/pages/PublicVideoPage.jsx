@@ -1,11 +1,12 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Suspense, lazy } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { Download, Printer } from 'lucide-react';
+import { Download, Printer, Eye } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import VideoPlayer from '../components/VideoPlayer';
 import QRCodeViewer from '../components/QRCodeViewer';
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
+
+const VideoPlayer = lazy(() => import('../components/VideoPlayer'));
 
 function PublicVideoPage() {
   const { videoId } = useParams();
@@ -277,11 +278,20 @@ function PublicVideoPage() {
       <div className="w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-blue-100 max-w-4xl mx-auto">
-            <VideoPlayer 
-              src={streamUrl} 
-              captions={video.captions || []} 
-              videoId={video.video_id || videoId}
-            />
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="mt-3 text-gray-600">Loading player...</p>
+                </div>
+              </div>
+            }>
+              <VideoPlayer 
+                src={streamUrl} 
+                captions={video.captions || []} 
+                videoId={video.video_id || videoId}
+              />
+            </Suspense>
           </div>
           
           {/* Video Title Section */}
@@ -289,6 +299,16 @@ function PublicVideoPage() {
             <h1 className="text-3xl font-bold mb-4 text-slate-900">
               {video.title || 'Untitled Video'}
             </h1>
+            
+            <div className="flex items-center gap-3 mb-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 text-slate-800 text-sm font-semibold border border-slate-200">
+                <Eye className="w-4 h-4 text-slate-600" />
+                <span>{video.views ?? 0} views</span>
+              </div>
+              <span className="text-xs text-slate-500">
+                {video.status ? video.status.charAt(0).toUpperCase() + video.status.slice(1) : ''}
+              </span>
+            </div>
             
             {/* Description */}
             {video.description && (
@@ -435,14 +455,7 @@ function PublicVideoPage() {
                     <span className="w-1 h-6 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full"></span>
                     QR Code
                   </h3>
-                  <button
-                    onClick={handleDownloadQRCode}
-                    className="px-2.5 py-1.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium text-xs shadow-sm transition-colors flex items-center gap-1"
-                    title="Download QR Code"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download
-                  </button>
+                  
                 </div>
                 <QRCodeViewer url={redirectUrl} videoId={video.video_id} />
               </div>

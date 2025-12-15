@@ -14,20 +14,29 @@ function ProtectedRoute({ children }) {
   useEffect(() => {
     const token = localStorage.getItem('token');
     
-    if (!token) {
+    // No token means not authenticated
+    if (!token || token.trim() === '') {
       setIsAuthenticated(false);
       setIsLoading(false);
       return;
     }
 
-    // Verify token with backend
+    // Verify token with backend - must get valid response
     api.get('/auth/verify')
-      .then(() => {
-        setIsAuthenticated(true);
-        setIsLoading(false);
+      .then((response) => {
+        // Only authenticate if response is valid and contains valid flag
+        if (response.data && response.data.valid !== false) {
+          setIsAuthenticated(true);
+          setIsLoading(false);
+        } else {
+          // Invalid response, remove token
+          localStorage.removeItem('token');
+          setIsAuthenticated(false);
+          setIsLoading(false);
+        }
       })
-      .catch(() => {
-        // Token invalid or expired
+      .catch((error) => {
+        // Token invalid, expired, or verification failed
         localStorage.removeItem('token');
         setIsAuthenticated(false);
         setIsLoading(false);

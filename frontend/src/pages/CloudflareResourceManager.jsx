@@ -899,9 +899,7 @@ function MyStorageManager() {
                 <thead className="bg-gradient-to-r from-slate-50 to-emerald-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Draft ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Title</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Planned URL</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Planned Path</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider min-w-[300px]">Title</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Subject</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Grade</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Unit</th>
@@ -927,18 +925,9 @@ function MyStorageManager() {
                           type="text"
                           value={item.title}
                           onChange={(e) => updateStagedField(item.id, 'title', e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full min-w-[300px] px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter full title..."
                         />
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="text-xs text-blue-700 font-mono bg-blue-50 px-3 py-2 rounded-lg break-all">
-                          {item.previewUrl}
-                          </div>
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="text-xs text-slate-700 font-mono bg-slate-50 px-3 py-2 rounded-lg">
-                          {item.plannedPath}
-                </div>
                       </td>
                       <td className="px-6 py-3">
                         <input

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense, lazy } from 'react';
 import { useParams } from 'react-router-dom';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import VideoPlayer from '../components/VideoPlayer';
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
+
+const VideoPlayer = lazy(() => import('../components/VideoPlayer'));
 
 function ShortUrlRedirect() {
   const { slug } = useParams();
@@ -485,12 +486,21 @@ function ShortUrlRedirect() {
             <div className="w-full max-w-6xl flex flex-col items-center gap-6" style={{ position: 'relative', zIndex: 1 }}>
               {/* Centered video player with 16:9 ratio */}
               <div className="w-full max-w-5xl aspect-video">
-                <VideoPlayer 
-                  src={streamingUrl} 
-                  captions={video.captions || []} 
-                  autoplay={true}
-                  videoId={video.video_id || slug}
-                />
+                <Suspense fallback={
+                  <div className="flex items-center justify-center h-full bg-black">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-white mx-auto"></div>
+                      <p className="mt-3 text-gray-200 text-sm">Loading player...</p>
+                    </div>
+                  </div>
+                }>
+                  <VideoPlayer 
+                    src={streamingUrl} 
+                    captions={video.captions || []} 
+                    autoplay={true}
+                    videoId={video.video_id || slug}
+                  />
+                </Suspense>
               </div>
 
               {/* Description */}

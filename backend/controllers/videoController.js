@@ -8,7 +8,7 @@ import config from '../config/config.js';
 import * as videoService from '../services/videoService.js';
 import * as redirectService from '../services/redirectService.js';
 import * as qrCodeService from '../services/qrCodeService.js';
-import { ensureDirectoryExists, getFileSize } from '../utils/fileUtils.js';
+import { ensureDirectoryExists, getFileSize, getVideoDuration } from '../utils/fileUtils.js';
 import { getBaseUrl } from '../utils/urlHelper.js';
 
 // Utility: check if a column exists in the videos table
@@ -404,7 +404,9 @@ export async function getVideoReplacementDiagnostic(req, res) {
 // Adding minimal stubs so the module loads correctly
 export async function getAllVideos(req, res) {
   try {
-    const videos = await videoService.getAllVideos(req.query);
+    const result = await videoService.getAllVideos(req.query);
+    const videos = result.videos || [];
+    const pagination = result.pagination || {};
     
     // Log to verify subject information is being returned
     if (videos.length > 0) {
@@ -470,7 +472,11 @@ export async function getAllVideos(req, res) {
       console.log('[getAllVideos Controller] =====================================');
     }
     
-    res.json(videosWithSubject);
+    // Return videos with pagination metadata
+    res.json({
+      videos: videosWithSubject,
+      pagination
+    });
   } catch (error) {
     console.error('Get all videos error:', error);
     res.status(500).json({ error: error.message });
@@ -480,7 +486,19 @@ export async function getAllVideos(req, res) {
 export async function getVideo(req, res) {
   try {
     const { videoId } = req.params;
-    const video = await videoService.getVideoByVideoId(videoId);
+    
+    // Try to get video by video_id first (most common case)
+    let video = await videoService.getVideoByVideoId(videoId);
+    
+    // If not found and videoId is numeric, try getting by database ID (for backward compatibility)
+    if (!video && /^\d+$/.test(videoId)) {
+      video = await videoService.getVideoById(parseInt(videoId, 10));
+      // Only return if video is active (public endpoint should not return inactive videos)
+      if (video && video.status !== 'active') {
+        video = null;
+      }
+    }
+    
     if (!video) {
       return res.status(404).json({ error: 'Video not found' });
     }
@@ -686,6 +704,16 @@ export async function uploadVideo(req, res) {
     
     const fileSize = fsSync.statSync(filePath).size;
     console.log(`[Upload Video] ✓ File verified, size: ${fileSize} bytes`);
+    
+    // Extract video duration from file
+    let videoDuration = 0;
+    try {
+      videoDuration = await getVideoDuration(filePath);
+      console.log(`[Upload Video] ✓ Video duration extracted: ${videoDuration} seconds`);
+    } catch (durationError) {
+      console.warn(`[Upload Video] ⚠ Could not extract video duration:`, durationError.message);
+      // Continue with duration = 0 if extraction fails
+    }
 
     // Generate QR code - must point to the public short link (frontend domain)
     const shortUrl = `${config.urls.frontend}/${redirectSlug}`;
@@ -761,6 +789,7 @@ export async function uploadVideo(req, res) {
       qrUrl,
       redirectSlug,
       size: fileSize,
+      duration: videoDuration, // Use extracted duration from video file
       status: status || 'active'
     };
     

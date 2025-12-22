@@ -9,8 +9,22 @@ export async function login(req, res) {
   try {
     const { username, password } = req.body;
     
+    // Strict validation - check for existence and non-empty strings
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password required' });
+    }
+    
+    // Trim and validate - ensure not just whitespace
+    const trimmedUsername = username.trim();
+    const trimmedPassword = password.trim();
+    
+    if (!trimmedUsername || !trimmedPassword) {
+      return res.status(400).json({ error: 'Username and password cannot be empty' });
+    }
+    
+    // Minimum length validation
+    if (trimmedUsername.length < 1 || trimmedPassword.length < 3) {
+      return res.status(400).json({ error: 'Invalid credentials' });
     }
     
     // For initial setup, use default admin credentials
@@ -20,14 +34,14 @@ export async function login(req, res) {
       password: process.env.ADMIN_PASSWORD || 'admin123'
     };
     
-    // Check if admin exists in database
+    // Check if admin exists in database (use trimmed username)
     const [users] = await pool.execute(
       `SELECT 
         id, username, email, full_name, role, 
         can_upload_videos, can_view_videos, can_check_links, can_check_qr_codes,
         is_active
       FROM admins WHERE username = ?`,
-      [username]
+      [trimmedUsername]
     );
     
     let isValid = false;
@@ -42,15 +56,19 @@ export async function login(req, res) {
         return res.status(403).json({ error: 'Account is inactive. Please contact administrator.' });
       }
       
-      // Verify password
+      // Verify password (use trimmed password)
       const [fullUser] = await pool.execute(
         'SELECT password_hash FROM admins WHERE id = ?',
         [user.id]
       );
-      isValid = await bcrypt.compare(password, fullUser[0].password_hash);
+      if (fullUser.length === 0 || !fullUser[0].password_hash) {
+        isValid = false;
+      } else {
+        isValid = await bcrypt.compare(trimmedPassword, fullUser[0].password_hash);
+      }
     } else {
-      // Fallback to default admin (for initial setup)
-      isValid = username === defaultAdmin.username && password === defaultAdmin.password;
+      // Fallback to default admin (for initial setup) - use trimmed values
+      isValid = trimmedUsername === defaultAdmin.username && trimmedPassword === defaultAdmin.password;
       if (isValid) {
         user = {
           id: null,
@@ -77,7 +95,7 @@ export async function login(req, res) {
       );
     }
     
-    const token = generateToken(user.id || username);
+    const token = generateToken(user.id || trimmedUsername);
     
     res.json({
       token,

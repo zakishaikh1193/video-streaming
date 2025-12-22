@@ -34,7 +34,9 @@ app.use(cors({
       'http://localhost:5173',
       'http://localhost:3000',
       'http://127.0.0.1:5173',
-      'http://127.0.0.1:3000'
+      'http://127.0.0.1:3000',
+      'https://kodeit-videos.legatolxp.online',
+      'https://qr.kodeit.online',
     ];
     
     if (allowedOrigins.includes(origin) || origin.includes('localhost') || origin.includes('127.0.0.1')) {

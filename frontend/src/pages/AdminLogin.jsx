@@ -24,18 +24,24 @@ function AdminLogin() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Redirect to dashboard if already logged in
+  // Redirect to dashboard if already logged in (only if token is valid)
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      // Verify token is still valid
+      // Verify token is still valid with backend
       api.get('/auth/verify')
-        .then(() => {
-          const from = location.state?.from?.pathname || '/admin';
-          navigate(from, { replace: true });
+        .then((response) => {
+          // Only redirect if verification is successful
+          if (response.data && response.data.valid) {
+            const from = location.state?.from?.pathname || '/admin';
+            navigate(from, { replace: true });
+          } else {
+            // Invalid token, remove it
+            localStorage.removeItem('token');
+          }
         })
         .catch(() => {
-          // Token invalid, remove it
+          // Token invalid or expired, remove it
           localStorage.removeItem('token');
         });
     }
@@ -47,15 +53,44 @@ function AdminLogin() {
     setLoading(true);
     setSuccess(false);
 
-    // Validation
-    if (!username || !password) {
+    // Trim whitespace from inputs
+    const trimmedUsername = username.trim();
+    const trimmedPassword = password.trim();
+
+    // Strict validation - require both fields and minimum lengths
+    if (!trimmedUsername || !trimmedPassword) {
       setError("Please fill in all fields.");
       setLoading(false);
       return;
     }
 
+    // Additional validation - ensure fields are not just whitespace
+    if (trimmedUsername.length < 1 || trimmedPassword.length < 1) {
+      setError("Username and password cannot be empty.");
+      setLoading(false);
+      return;
+    }
+
+    // Minimum password length check
+    if (trimmedPassword.length < 3) {
+      setError("Password must be at least 3 characters long.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await api.post('/auth/login', { username, password });
+      // Make API call with trimmed credentials
+      const response = await api.post('/auth/login', { 
+        username: trimmedUsername, 
+        password: trimmedPassword 
+      });
+
+      // Verify response contains token before proceeding
+      if (!response.data || !response.data.token) {
+        throw new Error('Invalid response from server');
+      }
+
+      // Store token only after successful authentication
       localStorage.setItem('token', response.data.token);
       setSuccess(true);
       
@@ -65,8 +100,11 @@ function AdminLogin() {
         navigate(from, { replace: true });
       }, 800);
     } catch (err) {
+      // Clear any existing token on error
+      localStorage.removeItem('token');
       setError(err.response?.data?.error || 'Login failed. Please check your credentials.');
       setLoading(false);
+      setSuccess(false);
     }
   };
 
@@ -147,6 +185,7 @@ function AdminLogin() {
               type="submit" 
               fullWidth 
               isLoading={loading}
+              disabled={loading || success || !username.trim() || !password.trim()}
               className={success ? "!bg-green-600 !hover:bg-green-700 !text-white" : "!bg-blue-600 !hover:bg-blue-700 !text-white !shadow-md"}
             >
               {success ? (

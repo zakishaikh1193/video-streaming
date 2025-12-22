@@ -104,8 +104,38 @@ function MyStorageManager() {
     setError('');
     setErrorDetails(null);
     try {
-      const response = await api.get('/videos?status=active');
-      let videosData = response.data || [];
+      const response = await api.get('/videos?status=active&limit=10000'); // High limit to get all videos
+      
+      // Handle both old format (array) and new format (object with videos and pagination)
+      let videosData = [];
+      if (Array.isArray(response.data)) {
+        // Old format - just an array
+        videosData = response.data;
+      } else if (response.data && response.data.videos) {
+        // New format - object with videos and pagination
+        videosData = response.data.videos || [];
+        
+        // If pagination exists and there are more pages, fetch all pages
+        const pagination = response.data.pagination;
+        if (pagination && pagination.totalPages > 1) {
+          const allVideos = [...videosData];
+          
+          // Fetch remaining pages
+          for (let page = 2; page <= pagination.totalPages; page++) {
+            const pageResponse = await api.get(`/videos?status=active&limit=10000&page=${page}`);
+            
+            if (pageResponse.data && pageResponse.data.videos) {
+              allVideos.push(...pageResponse.data.videos);
+            } else if (Array.isArray(pageResponse.data)) {
+              allVideos.push(...pageResponse.data);
+            }
+          }
+          
+          videosData = allVideos;
+        }
+      } else {
+        videosData = [];
+      }
       
       // Filter out old videos with empty course, unit, and module (old structure)
       videosData = videosData.filter(video => {
@@ -899,9 +929,7 @@ function MyStorageManager() {
                 <thead className="bg-gradient-to-r from-slate-50 to-emerald-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Draft ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Title</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Planned URL</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Planned Path</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider min-w-[300px]">Title</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Subject</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Grade</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Unit</th>
@@ -927,18 +955,9 @@ function MyStorageManager() {
                           type="text"
                           value={item.title}
                           onChange={(e) => updateStagedField(item.id, 'title', e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full min-w-[300px] px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter full title..."
                         />
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="text-xs text-blue-700 font-mono bg-blue-50 px-3 py-2 rounded-lg break-all">
-                          {item.previewUrl}
-                          </div>
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="text-xs text-slate-700 font-mono bg-slate-50 px-3 py-2 rounded-lg">
-                          {item.plannedPath}
-                </div>
                       </td>
                       <td className="px-6 py-3">
                         <input

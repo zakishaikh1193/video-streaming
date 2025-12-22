@@ -67,6 +67,42 @@ export async function getFileSize(filePath) {
   }
 }
 
+/**
+ * Get video duration in seconds using ffprobe
+ */
+export async function getVideoDuration(videoPath) {
+  try {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    
+    // Use ffprobe to get duration (more reliable than ffmpeg)
+    // -v error: Only show errors
+    // -show_entries format=duration: Get duration from format
+    // -of default=noprint_wrappers=1:nokey=1: Output only the value
+    const command = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`;
+    
+    try {
+      const { stdout } = await execAsync(command);
+      const duration = parseFloat(stdout.trim());
+      
+      if (isNaN(duration) || duration <= 0) {
+        console.warn(`[getVideoDuration] Invalid duration extracted: ${stdout.trim()}`);
+        return 0;
+      }
+      
+      // Round to nearest integer (duration in seconds)
+      return Math.round(duration);
+    } catch (error) {
+      console.error(`[getVideoDuration] FFprobe error for ${videoPath}:`, error.message);
+      return 0;
+    }
+  } catch (error) {
+    console.error(`[getVideoDuration] Error getting video duration:`, error.message);
+    return 0;
+  }
+}
+
 
 
 

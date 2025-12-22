@@ -48,8 +48,40 @@ function AdminDashboard() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/videos');
-      const videos = response.data || [];
+      
+      // Fetch ALL videos for dashboard statistics (use high limit to get all)
+      // For dashboard, we need complete stats, so fetch all videos
+      const response = await api.get('/videos?limit=10000'); // High limit to get all videos
+      
+      // Handle both old format (array) and new format (object with videos and pagination)
+      let videos = [];
+      if (Array.isArray(response.data)) {
+        // Old format - just an array
+        videos = response.data;
+      } else if (response.data && response.data.videos) {
+        // New format - object with videos and pagination
+        videos = response.data.videos || [];
+        
+        // If pagination exists and there are more videos, fetch all pages
+        const pagination = response.data.pagination;
+        if (pagination && pagination.totalPages > 1) {
+          const allVideos = [...videos];
+          
+          // Fetch remaining pages
+          for (let page = 2; page <= pagination.totalPages; page++) {
+            const pageResponse = await api.get(`/videos?limit=10000&page=${page}`);
+            if (pageResponse.data && pageResponse.data.videos) {
+              allVideos.push(...pageResponse.data.videos);
+            } else if (Array.isArray(pageResponse.data)) {
+              allVideos.push(...pageResponse.data);
+            }
+          }
+          
+          videos = allVideos;
+        }
+      } else {
+        videos = [];
+      }
 
       const activeVideos = videos.filter(v => v.status === 'active');
       const inactiveVideos = videos.filter(v => v.status === 'inactive');
@@ -58,8 +90,25 @@ function AdminDashboard() {
       
       // Only count storage for active and inactive videos (exclude deleted)
       const validVideos = videos.filter(v => v.status === 'active' || v.status === 'inactive');
-      const totalSize = validVideos.reduce((sum, v) => sum + (v.size || 0), 0);
-      const totalDuration = validVideos.reduce((sum, v) => sum + (v.duration || 0), 0);
+      const totalSize = validVideos.reduce((sum, v) => sum + (Number(v.size) || 0), 0);
+      
+      // Calculate total duration - ensure duration is parsed as number (stored in seconds)
+      const totalDuration = validVideos.reduce((sum, v) => {
+        const duration = Number(v.duration) || 0;
+        return sum + duration;
+      }, 0);
+      
+      console.log('[Dashboard] Duration calculation:', {
+        totalVideos: validVideos.length,
+        videosWithDuration: validVideos.filter(v => v.duration && Number(v.duration) > 0).length,
+        totalDurationSeconds: totalDuration,
+        sampleDurations: validVideos.slice(0, 5).map(v => ({ 
+          video_id: v.video_id, 
+          duration: v.duration, 
+          durationType: typeof v.duration,
+          durationNumber: Number(v.duration) 
+        }))
+      });
       const videosWithCaptions = videos.filter(v => v.captions && v.captions.length > 0).length;
       const videosWithThumbnails = videos.filter(v => v.thumbnail_url).length;
 
@@ -137,13 +186,25 @@ function AdminDashboard() {
   };
 
   const formatDuration = (seconds) => {
-    if (!seconds) return '0 min';
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
+    // Ensure seconds is a number
+    const totalSeconds = Number(seconds) || 0;
+    if (totalSeconds === 0) return '0 min';
+    
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    
+    // Format: hours, minutes, seconds
     if (hours > 0) {
-      return `${hours}h ${minutes}m`;
+      if (minutes > 0) {
+        return `${hours}h ${minutes}m`;
+      }
+      return `${hours}h`;
     }
-    return `${minutes} min`;
+    if (minutes > 0) {
+      return `${minutes} min`;
+    }
+    return `${secs} sec`;
   };
 
   const formatDate = (dateString) => {

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Plus, Edit, Trash2, Search, X, Check, XCircle, Eye, EyeOff, ChevronDown, ChevronUp, Upload, Trash2 as DeleteIcon, Clock } from 'lucide-react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { Plus, Edit, Trash2, Search, X, Check, XCircle, ChevronDown, ChevronUp, Upload, Clock } from 'lucide-react';
 import api from '../services/api';
 
 function UserManagement() {
@@ -30,19 +30,30 @@ function UserManagement() {
   const [expandedUsers, setExpandedUsers] = useState(new Set());
   const [userActivities, setUserActivities] = useState({});
   const [loadingActivities, setLoadingActivities] = useState({});
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+
+  // Debounce search term to reduce API calls
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+      setPagination(prev => ({ ...prev, page: 1 }));
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   useEffect(() => {
     fetchUsers();
-  }, [pagination.page, searchTerm]);
+  }, [pagination.page, debouncedSearchTerm]);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
         page: pagination.page,
         limit: pagination.limit
       });
-      if (searchTerm) params.append('search', searchTerm);
+      if (debouncedSearchTerm) params.append('search', debouncedSearchTerm);
 
       const response = await api.get(`/users?${params.toString()}`);
       setUsers(response.data.users);
@@ -61,7 +72,7 @@ function UserManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [pagination.page, pagination.limit, debouncedSearchTerm]);
 
   const handleRoleChange = (role) => {
     setFormData(prev => {
@@ -180,7 +191,7 @@ function UserManagement() {
     }
   };
 
-  const toggleUserExpanded = async (userId) => {
+  const toggleUserExpanded = useCallback(async (userId) => {
     const newExpanded = new Set(expandedUsers);
     if (newExpanded.has(userId)) {
       newExpanded.delete(userId);
@@ -192,9 +203,9 @@ function UserManagement() {
       }
     }
     setExpandedUsers(newExpanded);
-  };
+  }, [expandedUsers, userActivities]);
 
-  const fetchUserActivity = async (userId) => {
+  const fetchUserActivity = useCallback(async (userId) => {
     try {
       setLoadingActivities(prev => ({ ...prev, [userId]: true }));
       const response = await api.get(`/users/${userId}/activity`);
@@ -211,9 +222,9 @@ function UserManagement() {
     } finally {
       setLoadingActivities(prev => ({ ...prev, [userId]: false }));
     }
-  };
+  }, []);
 
-  const formatDateTime = (dateString) => {
+  const formatDateTime = useCallback((dateString) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
     return date.toLocaleString('en-US', {
@@ -223,7 +234,12 @@ function UserManagement() {
       hour: '2-digit',
       minute: '2-digit'
     });
-  };
+  }, []);
+
+  // Memoize filtered users to prevent unnecessary re-renders
+  const filteredUsers = useMemo(() => {
+    return users;
+  }, [users]);
 
   if (loading && users.length === 0) {
     return (
@@ -266,7 +282,6 @@ function UserManagement() {
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
-              setPagination(prev => ({ ...prev, page: 1 }));
             }}
             className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
           />
@@ -314,7 +329,7 @@ function UserManagement() {
                   </td>
                 </tr>
               ) : (
-                users.map((user) => (
+                filteredUsers.map((user) => (
                   <>
                     <tr key={user.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -524,7 +539,7 @@ function UserManagement() {
                                 className="w-full px-4 py-3 bg-gradient-to-r from-red-50 to-rose-50 hover:from-red-100 hover:to-rose-100 transition-colors flex items-center justify-between"
                               >
                                 <div className="flex items-center gap-3">
-                                  <DeleteIcon className="w-5 h-5 text-red-600" />
+                                  <Trash2 className="w-5 h-5 text-red-600" />
                                   <span className="font-semibold text-slate-900">
                                     Deletes ({userActivities[user.id]?.activities?.deletes?.length || 0})
                                   </span>

@@ -85,17 +85,57 @@ function CSVExport() {
 
       // Use the same endpoint logic as CSV export - get filtered videos
       // This ensures the count matches exactly what will be in the CSV
+      // Fetch with high limit to get all videos for accurate count
       const response = await api.get('/videos', { 
         params: {
           ...params,
-          status: 'active' // Only count active videos (same as CSV export)
+          status: 'active', // Only count active videos (same as CSV export)
+          limit: 10000 // High limit to get all videos
         }
       });
       
+      // Handle both old format (array) and new format (object with videos and pagination)
+      let videos = [];
+      if (Array.isArray(response.data)) {
+        // Old format - just an array
+        videos = response.data;
+      } else if (response.data && response.data.videos) {
+        // New format - object with videos and pagination
+        videos = response.data.videos || [];
+        
+        // If pagination exists and there are more pages, fetch all pages
+        const pagination = response.data.pagination;
+        if (pagination && pagination.totalPages > 1) {
+          const allVideos = [...videos];
+          
+          // Fetch remaining pages
+          for (let page = 2; page <= pagination.totalPages; page++) {
+            const pageResponse = await api.get('/videos', {
+              params: {
+                ...params,
+                status: 'active',
+                limit: 10000,
+                page: page
+              }
+            });
+            
+            if (pageResponse.data && pageResponse.data.videos) {
+              allVideos.push(...pageResponse.data.videos);
+            } else if (Array.isArray(pageResponse.data)) {
+              allVideos.push(...pageResponse.data);
+            }
+          }
+          
+          videos = allVideos;
+        }
+      } else {
+        videos = [];
+      }
+      
       // Count only videos that have redirect_slug (QR codes) - same as CSV export should include
-      const videosWithQR = response.data?.filter(video => 
+      const videosWithQR = videos.filter(video => 
         video.redirect_slug && video.redirect_slug.trim() !== ''
-      ) || [];
+      );
       
       setVideoCount(videosWithQR.length);
     } catch (err) {

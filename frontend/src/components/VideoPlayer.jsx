@@ -7,14 +7,44 @@ import { AlertCircle, Pause } from 'lucide-react';
 import VideoDiagnostic from './VideoDiagnostic';
 import api from '../services/api';
 
+const VIEW_KEY = 'video_viewed_ids';
+
+const hasViewed = (videoId) => {
+  try {
+    const raw = localStorage.getItem(VIEW_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    return !!data[videoId];
+  } catch {
+    return false;
+  }
+};
+
+const markViewed = (videoId) => {
+  try {
+    const raw = localStorage.getItem(VIEW_KEY);
+    const data = raw ? JSON.parse(raw) : {};
+    data[videoId] = Date.now();
+    localStorage.setItem(VIEW_KEY, JSON.stringify(data));
+  } catch {
+    // ignore storage errors
+  }
+};
+
 // Function to increment view count
 const incrementViewCount = async (videoId) => {
   try {
     if (!videoId) return;
     
+    // Prevent multiple counts for the same user/browser
+    if (hasViewed(videoId)) {
+      return;
+    }
+    
     // Try by video_id first, then by database ID or redirect_slug
     await api.post(`/videos/${videoId}/increment-views`);
     console.log(`[VideoPlayer] View count incremented for video: ${videoId}`);
+    markViewed(videoId);
   } catch (error) {
     // Silent fail - don't interrupt video playback
     console.warn('[VideoPlayer] Could not increment view count:', error.message);

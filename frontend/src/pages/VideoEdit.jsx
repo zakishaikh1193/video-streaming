@@ -36,8 +36,67 @@ function VideoEdit() {
 
   const fetchVideo = async () => {
     try {
-      const response = await api.get(`/videos/by-id/${id}`);
-      const foundVideo = response.data;
+      setLoading(true);
+      setError('');
+      
+      // Log the request being made
+      console.log('[VideoEdit] Fetching video with database ID:', id);
+      console.log('[VideoEdit] API base URL:', api.defaults.baseURL);
+      
+      let foundVideo = null;
+      
+      // Strategy 1: Try /by-id/:id endpoint (protected, works for all videos)
+      try {
+        console.log('[VideoEdit] Strategy 1: Trying /videos/by-id/' + id);
+        const response = await api.get(`/videos/by-id/${id}`);
+        foundVideo = response.data;
+        console.log('[VideoEdit] Successfully fetched via /by-id endpoint');
+      } catch (byIdError) {
+        console.log('[VideoEdit] Strategy 1 failed:', byIdError.response?.status);
+        
+        // Strategy 2: Try /videos/:id endpoint (handles numeric IDs)
+        try {
+          console.log('[VideoEdit] Strategy 2: Trying /videos/' + id);
+          const response = await api.get(`/videos/${id}`);
+          foundVideo = response.data;
+          console.log('[VideoEdit] Successfully fetched via /videos endpoint');
+        } catch (videoError) {
+          console.log('[VideoEdit] Strategy 2 failed:', videoError.response?.status);
+          
+          // Strategy 3: Fetch all videos and find by ID (most reliable)
+          try {
+            console.log('[VideoEdit] Strategy 3: Fetching all videos to find ID ' + id);
+            const allVideosResponse = await api.get('/videos');
+            const allVideos = allVideosResponse.data || [];
+            foundVideo = allVideos.find(v => v.id === parseInt(id, 10));
+            
+            if (foundVideo) {
+              console.log('[VideoEdit] Successfully found video in videos list');
+            } else {
+              // Try inactive videos too
+              console.log('[VideoEdit] Not found in active videos, trying inactive...');
+              const inactiveResponse = await api.get('/videos?status=inactive');
+              const inactiveVideos = inactiveResponse.data || [];
+              foundVideo = inactiveVideos.find(v => v.id === parseInt(id, 10));
+              
+              if (foundVideo) {
+                console.log('[VideoEdit] Found video in inactive videos');
+              } else {
+                throw new Error('Video not found in any video list');
+              }
+            }
+          } catch (listError) {
+            console.error('[VideoEdit] All strategies failed');
+            throw byIdError; // Throw original error
+          }
+        }
+      }
+      
+      if (!foundVideo) {
+        throw new Error(`Video with ID ${id} not found`);
+      }
+      
+      const video = foundVideo;
       
       // Log the size being fetched
       console.log('[VideoEdit] fetchVideo - Received video data:', {
@@ -48,6 +107,7 @@ function VideoEdit() {
       });
       
       if (foundVideo) {
+        console.log('[VideoEdit] Successfully fetched video:', foundVideo.id);
         setVideo(foundVideo);
         
         // Use the same logic as VideoList.jsx for fetching subject
@@ -119,7 +179,29 @@ function VideoEdit() {
         setError('Video not found');
       }
     } catch (err) {
-      setError('Failed to load video');
+      console.error('[VideoEdit] Error fetching video:', {
+        error: err,
+        message: err.message,
+        response: err.response,
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        url: err.config?.url,
+        baseURL: err.config?.baseURL,
+        fullURL: err.config?.baseURL + err.config?.url
+      });
+      
+      if (err.response?.status === 404) {
+        setError(`Video with ID ${id} not found. The video may have been deleted or the ID is incorrect.`);
+      } else if (err.response?.status === 401) {
+        setError('Authentication required. Please log in again.');
+        // Redirect to login after a delay
+        setTimeout(() => {
+          navigate('/admin/login');
+        }, 2000);
+      } else {
+        setError(err.response?.data?.error || err.message || 'Failed to load video');
+      }
     } finally {
       setLoading(false);
     }
@@ -820,29 +902,20 @@ function VideoEdit() {
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">
-                      Streaming URL
+                      Short URL
                     </label>
                     <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
                       <Link2 className="w-4 h-4 text-slate-400" />
                       <span className="text-sm text-slate-700 break-all" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
-                        {formData.streaming_url || 'N/A'}
+                        {(() => {
+                          const slug = video?.redirect_slug || video?.video_id;
+                          if (!slug) return 'N/A';
+                          const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                          return `${origin}/${slug}`;
+                        })()}
                       </span>
                     </div>
                   </div>
-
-                  {video?.qr_url && (
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">
-                        QR Code
-                      </label>
-                      <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                        <QrCode className="w-4 h-4 text-slate-400" />
-                        <span className="text-sm text-slate-700 break-all" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
-                          {video.qr_url}
-                        </span>
-                      </div>
-                    </div>
-                  )}
 
                   {video?.size && (
                     <div>

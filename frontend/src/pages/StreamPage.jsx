@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense, lazy } from 'react';
 import { useParams } from 'react-router-dom';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import VideoPlayer from '../components/VideoPlayer';
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
+
+const VideoPlayer = lazy(() => import('../components/VideoPlayer'));
 
 function StreamPage() {
   const { videoId } = useParams();
@@ -156,12 +157,21 @@ function StreamPage() {
             {/* Video Player Container */}
             <div className="bg-white rounded-2xl overflow-hidden shadow-xl border border-slate-200">
               <div className="aspect-video w-full">
-                <VideoPlayer 
-                  src={streamingUrl} 
-                  captions={video.captions || []} 
-                  autoplay={true}
-                  videoId={video.video_id || videoId}
-                />
+                <Suspense fallback={
+                  <div className="flex items-center justify-center h-full bg-slate-50">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
+                      <p className="mt-3 text-gray-600 text-sm">Loading player...</p>
+                    </div>
+                  </div>
+                }>
+                  <VideoPlayer 
+                    src={streamingUrl} 
+                    captions={video.captions || []} 
+                    autoplay={true}
+                    videoId={video.video_id || videoId}
+                  />
+                </Suspense>
               </div>
             </div>
             

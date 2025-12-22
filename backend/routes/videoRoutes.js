@@ -114,6 +114,7 @@ router.get('/qr-codes', (req, res, next) => {
   next();
 }, authenticateToken, videoController.getAllQRCodes);
 router.get('/thumbnails', authenticateToken, thumbnailController.getThumbnails);
+router.get('/thumbnails/diagnostic', authenticateToken, thumbnailController.getThumbnailDiagnostic);
 router.get('/export-csv', authenticateToken, videoController.generateVideosCSV);
 router.get('/export-filtered-csv', (req, res, next) => {
   console.log('[Route] /export-filtered-csv route hit');

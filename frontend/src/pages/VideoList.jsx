@@ -232,6 +232,8 @@ function VideoList() {
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('card'); // 'card' or 'list'
+  const [pagination, setPagination] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const [filterOptions, setFilterOptions] = useState({
     subjects: [],
     courses: [], // Keep for backward compatibility
@@ -329,12 +331,25 @@ function VideoList() {
     }
   }, [isInactiveRoute]);
 
+  // Track previous filter values to detect changes
+  const prevFiltersRef = useRef(filters);
+  
   useEffect(() => {
-    // Reset loading state when filters change
+    // Check if any filter changed (not page)
+    const filtersChanged = JSON.stringify(prevFiltersRef.current) !== JSON.stringify(filters);
+    
+    if (filtersChanged) {
+      // Reset to page 1 when filters change
+      setCurrentPage(1);
+      prevFiltersRef.current = filters;
+    }
+    
+    // Always fetch videos when filters or page changes
     setLoading(true);
-    fetchVideos();
+    fetchVideos(filtersChanged ? 1 : currentPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    currentPage,
     filters.search,
     filters.subject,
     filters.course,
@@ -356,7 +371,7 @@ function VideoList() {
     }
   };
 
-  const fetchVideos = async () => {
+  const fetchVideos = async (page = currentPage) => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
@@ -371,10 +386,28 @@ function VideoList() {
       if (filters.moduleNumber && filters.moduleNumber.toString().trim()) params.append('moduleNumber', filters.moduleNumber.toString().trim());
       if (filters.version && filters.version.toString().trim()) params.append('version', filters.version.toString().trim());
       if (filters.status && filters.status.trim()) params.append('status', filters.status.trim());
+      
+      // Add pagination params
+      params.append('page', page.toString());
+      params.append('limit', '50');
 
       console.log('[VideoList] Fetching videos with filters:', Object.fromEntries(params));
       const response = await api.get(`/videos?${params.toString()}`);
-      const videosData = response.data || [];
+      
+      // Handle both old format (array) and new format (object with pagination)
+      let videosData = [];
+      let paginationData = null;
+      
+      if (Array.isArray(response.data)) {
+        // Old format - just an array
+        videosData = response.data;
+      } else if (response.data && response.data.videos) {
+        // New format - object with videos and pagination
+        videosData = response.data.videos || [];
+        paginationData = response.data.pagination || null;
+      } else {
+        videosData = [];
+      }
       
       // Log to verify subject information is being fetched from database - show all fields including nulls
       if (videosData.length > 0) {
@@ -415,6 +448,13 @@ function VideoList() {
       }
       
       setVideos(videosData);
+      if (paginationData) {
+        setPagination(paginationData);
+        setCurrentPage(paginationData.page || 1);
+        console.log('[VideoList] Pagination:', paginationData);
+      } else {
+        setPagination(null);
+      }
       console.log('[VideoList] Successfully fetched', videosData.length, 'videos');
     } catch (error) {
       console.error('[VideoList] Failed to fetch videos:', error);
@@ -906,6 +946,7 @@ function VideoList() {
                             <img
                               src={thumbnailUrl}
                               alt={video.title}
+                              loading="lazy"
                               className="w-full h-full object-cover"
                               onError={(e) => {
                                 e.target.style.display = 'none';
@@ -1144,15 +1185,17 @@ function VideoList() {
                     setHoveredVideoId(null);
                   }}
                 >
-                  {/* Video Frame Thumbnail - Extract frame from video and show as image */}
-                  <VideoFrameThumbnail videoId={video.video_id} />
+                  {/* Video Frame Thumbnail - DISABLED for performance (causes 2-3GB cache) */}
+                  {/* <VideoFrameThumbnail videoId={video.video_id} /> */}
 
                   {/* Thumbnail Image - Show if available, overlay on top of video preview */}
+                  {/* Using loading="lazy" to improve performance */}
                   {thumbnailUrl && (
                     <div className="relative w-full h-full rounded-lg overflow-hidden border border-white shadow-md z-10">
                       <img
                         src={thumbnailUrl}
                         alt={video.title}
+                        loading="lazy"
                         className={`w-full h-full object-cover transition-opacity duration-300 ${
                           hoveredVideoId === video.video_id ? 'opacity-30' : 'opacity-100'
                         }`}
@@ -1189,11 +1232,13 @@ function VideoList() {
                     <p className="text-xs text-slate-700 font-semibold">Loading...</p>
                   </div>
                   
-                  {/* Video Preview on Hover - Overlay on top */}
-                  <VideoPreview 
-                    videoId={video.video_id} 
-                    isHovered={hoveredVideoId === video.video_id} 
-                  />
+                  {/* Video Preview on Hover - Overlay on top - Only load when actually hovered for 500ms+ */}
+                  {hoveredVideoId === video.video_id && (
+                    <VideoPreview 
+                      videoId={video.video_id} 
+                      isHovered={true} 
+                    />
+                  )}
 
                   {/* Play Button Overlay (only on hover, but not when video preview is showing) */}
                   {hoveredVideoId !== video.video_id && (
@@ -1775,6 +1820,69 @@ function VideoList() {
                 </div>
               ) : null}
             </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Pagination Controls */}
+      {pagination && pagination.totalPages > 1 && (
+        <div className="mt-8 flex items-center justify-center gap-2">
+          <button
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            disabled={currentPage === 1 || loading}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              currentPage === 1 || loading
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                : 'bg-white text-slate-700 hover:bg-blue-50 hover:text-blue-700 border border-slate-300 shadow-sm'
+            }`}
+          >
+            Previous
+          </button>
+          
+          <div className="flex items-center gap-1">
+            {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+              let pageNum;
+              if (pagination.totalPages <= 5) {
+                pageNum = i + 1;
+              } else if (currentPage <= 3) {
+                pageNum = i + 1;
+              } else if (currentPage >= pagination.totalPages - 2) {
+                pageNum = pagination.totalPages - 4 + i;
+              } else {
+                pageNum = currentPage - 2 + i;
+              }
+              
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => setCurrentPage(pageNum)}
+                  disabled={loading}
+                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    currentPage === pageNum
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-white text-slate-700 hover:bg-blue-50 hover:text-blue-700 border border-slate-300'
+                  } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+          </div>
+          
+          <button
+            onClick={() => setCurrentPage(prev => Math.min(pagination.totalPages, prev + 1))}
+            disabled={currentPage === pagination.totalPages || loading}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              currentPage === pagination.totalPages || loading
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                : 'bg-white text-slate-700 hover:bg-blue-50 hover:text-blue-700 border border-slate-300 shadow-sm'
+            }`}
+          >
+            Next
+          </button>
+          
+          <div className="ml-4 text-sm text-slate-600">
+            Page {pagination.page} of {pagination.totalPages} ({pagination.total} total videos)
           </div>
         </div>
       )}

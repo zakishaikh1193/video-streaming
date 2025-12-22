@@ -810,13 +810,31 @@ export async function getAllVideos(filters = {}) {
   
   // Don't filter by file_path - include all videos regardless of storage location
   // This ensures videos in upload/, my-storage/, and other locations are all shown
+  
+  // Get total count for pagination info (before adding LIMIT/OFFSET)
+  const countQuery = query.replace(/SELECT .* FROM/i, 'SELECT COUNT(*) as total FROM');
+  const countQueryClean = countQuery.replace(/ORDER BY .*/i, ''); // Remove ORDER BY from count query
+  const [countRows] = await pool.execute(countQueryClean, params);
+  const total = countRows[0]?.total || 0;
+  
+  // Add pagination - default to 50 videos per page to improve performance
+  const page = parseInt(filters.page) || 1;
+  const limit = parseInt(filters.limit) || 50; // Default 50, max 200
+  const safeLimit = Math.min(limit, 200); // Cap at 200 to prevent abuse
+  const offset = (page - 1) * safeLimit;
+  
+  // Add ORDER BY and LIMIT/OFFSET using direct values (not placeholders) to avoid MySQL parameter binding issues
   query += ' ORDER BY created_at DESC';
+  query += ` LIMIT ${safeLimit} OFFSET ${offset}`;
   
   // Log the final query for debugging
   console.log('[getAllVideos] Final query:', query);
   console.log('[getAllVideos] Query params:', params);
+  console.log('[getAllVideos] Pagination: page=', page, 'limit=', safeLimit, 'offset=', offset);
   
   const [rows] = await pool.execute(query, params);
+  
+  console.log(`[getAllVideos] Found ${rows.length} videos (page ${page} of ${Math.ceil(total / safeLimit)}, total: ${total})`);
   
   console.log(`[getAllVideos] Found ${rows.length} videos`);
   console.log(`[getAllVideos] Query executed: ${query}`);
@@ -877,32 +895,7 @@ export async function getAllVideos(filters = {}) {
     
     // Log all column names to verify all fields are being selected
     console.log('[getAllVideos] Available columns in result:', Object.keys(sampleVideo));
-    console.log('[getAllVideos] Expected columns in SELECT:', selectColumns);
-    
-    // Compare expected vs actual
-    const missingColumns = selectColumns.filter(col => !(col in sampleVideo));
-    if (missingColumns.length > 0) {
-      console.warn('[getAllVideos] ⚠️ WARNING: Columns in SELECT but not in result:', missingColumns);
-    }
   }
-  
-  // Log file paths to verify upload/ videos are included
-  if (rows.length > 0) {
-    const uploadVideos = rows.filter(v => v.file_path && v.file_path.startsWith('upload/'));
-    console.log(`[getAllVideos] Videos in upload/ folder: ${uploadVideos.length}`);
-    if (uploadVideos.length > 0) {
-      console.log('[getAllVideos] Upload videos:', uploadVideos.map(v => ({ id: v.id, video_id: v.video_id, file_path: v.file_path, status: v.status })));
-    }
-  }
-  
-  // Ensure all fields are returned with proper mapping and backward compatibility
-  // CRITICAL: Map each video and explicitly ensure subject and module are included
-  return rows.map((video, index) => {
-    // Determine subject value (course column removed, only use subject)
-    // Preserve actual values including "0" and empty strings that might be valid
-    const subjectValue = (video.subject !== undefined && video.subject !== null && String(video.subject).trim() !== '') 
-      ? String(video.subject).trim() 
-      : null;
     
     // Helper to preserve values including "0"
     const preserveValue = (val) => {
@@ -910,6 +903,14 @@ export async function getAllVideos(filters = {}) {
       const str = String(val).trim();
       return str !== '' ? str : null;
     };
+  
+  // Map videos with proper field mapping
+  const mappedVideos = rows.map((video, index) => {
+    // Determine subject value (course column removed, only use subject)
+    // Preserve actual values including "0" and empty strings that might be valid
+    const subjectValue = (video.subject !== undefined && video.subject !== null && String(video.subject).trim() !== '') 
+      ? String(video.subject).trim() 
+      : null;
     
     // CRITICAL: Explicitly map module value - ensure it's always included in result
     const moduleValue = preserveValue(video.module);
@@ -928,25 +929,16 @@ export async function getAllVideos(filters = {}) {
       // Explicitly preserve duration field (duration in seconds)
       duration: video.duration !== null && video.duration !== undefined ? Number(video.duration) : (video.duration || 0),
       // Format version to show decimals without trailing zeros (e.g., 1.1, 1.2, 1.3)
-      // Display format: 1.1, 1.2, 1.3 (not 1.10, 1.20, 1.30)
       version: video.version !== null && video.version !== undefined 
         ? (() => {
-            // If it's a number (from MySQL DECIMAL), format to remove trailing zeros
             if (typeof video.version === 'number') {
-              // Check if it's a whole number (e.g., 1, 2, 3)
               if (Number.isInteger(video.version)) {
-                // For whole numbers, return as string (e.g., "1", "2")
                 return String(video.version);
               }
-              // For decimal numbers, format to remove trailing zeros
-              // Use toFixed(2) to ensure precision, then remove trailing zeros
-              // e.g., 1.00 -> "1", 1.10 -> "1.1", 1.20 -> "1.2", 1.12 -> "1.12"
               return video.version.toFixed(2).replace(/\.?0+$/, '');
             }
-            // If it's already a string, parse and format to remove trailing zeros
             const str = String(video.version).trim();
             if (str === '') return null;
-            // Try to parse as number to normalize format
             const num = parseFloat(str);
             if (!isNaN(num)) {
               if (Number.isInteger(num)) {
@@ -954,49 +946,26 @@ export async function getAllVideos(filters = {}) {
               }
               return num.toFixed(2).replace(/\.?0+$/, '');
             }
-            // If can't parse, return as-is
             return str;
           })()
         : (video.version || null),
       description: video.description !== undefined ? video.description : null
     };
     
-    // Log first 3 videos for debugging to see raw vs mapped values
-    if (index < 3) {
-      console.log(`[getAllVideos] Video ${index + 1} - Before mapping (raw from DB):`, {
-        id: video.id,
-        video_id: video.video_id,
-        subject: video.subject,
-        course: video.course,
-        module: video.module,
-        grade: video.grade,
-        unit: video.unit,
-        lesson: video.lesson,
-        version: video.version,
-        versionType: typeof video.version,
-        versionRaw: video.version,
-        hasSubject: 'subject' in video,
-        hasModule: 'module' in video,
-        allKeys: Object.keys(video)
-      });
-      console.log(`[getAllVideos] Video ${index + 1} - After mapping (returned to controller):`, {
-        id: result.id,
-        video_id: result.video_id,
-        subject: result.subject,
-        module: result.module,
-        unit: result.unit,
-        grade: result.grade,
-        lesson: result.lesson,
-        version: result.version,
-        versionType: typeof result.version,
-        size: result.size,
-        sizeType: typeof result.size,
-        sizeMB: result.size ? (result.size / 1024 / 1024).toFixed(2) + ' MB' : '0 MB'
-      });
-    }
-    
     return result;
   });
+  
+  // Return videos with pagination metadata
+  return {
+    videos: mappedVideos,
+    pagination: {
+      page,
+      limit: safeLimit,
+      total,
+      totalPages: Math.ceil(total / safeLimit),
+      hasMore: offset + rows.length < total
+    }
+  };
 }
 
 /**

@@ -104,8 +104,38 @@ function MyStorageManager() {
     setError('');
     setErrorDetails(null);
     try {
-      const response = await api.get('/videos?status=active');
-      let videosData = response.data || [];
+      const response = await api.get('/videos?status=active&limit=10000'); // High limit to get all videos
+      
+      // Handle both old format (array) and new format (object with videos and pagination)
+      let videosData = [];
+      if (Array.isArray(response.data)) {
+        // Old format - just an array
+        videosData = response.data;
+      } else if (response.data && response.data.videos) {
+        // New format - object with videos and pagination
+        videosData = response.data.videos || [];
+        
+        // If pagination exists and there are more pages, fetch all pages
+        const pagination = response.data.pagination;
+        if (pagination && pagination.totalPages > 1) {
+          const allVideos = [...videosData];
+          
+          // Fetch remaining pages
+          for (let page = 2; page <= pagination.totalPages; page++) {
+            const pageResponse = await api.get(`/videos?status=active&limit=10000&page=${page}`);
+            
+            if (pageResponse.data && pageResponse.data.videos) {
+              allVideos.push(...pageResponse.data.videos);
+            } else if (Array.isArray(pageResponse.data)) {
+              allVideos.push(...pageResponse.data);
+            }
+          }
+          
+          videosData = allVideos;
+        }
+      } else {
+        videosData = [];
+      }
       
       // Filter out old videos with empty course, unit, and module (old structure)
       videosData = videosData.filter(video => {

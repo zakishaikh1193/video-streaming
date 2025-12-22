@@ -284,6 +284,18 @@ function VideoList() {
     fetchVideos();
   }, []);
 
+  // Refresh videos when navigating back from edit page (location key changes)
+  useEffect(() => {
+    // Refresh videos when location changes (e.g., coming back from edit page)
+    const shouldRefresh = location.state?.refresh || false;
+    if (shouldRefresh) {
+      console.log('[VideoList] Refreshing videos after navigation to get updated file sizes');
+      fetchVideos();
+      // Clear the refresh flag
+      window.history.replaceState({ ...location.state, refresh: false }, '');
+    }
+  }, [location.key, location.state]);
+
   // Update status filter when route changes
   useEffect(() => {
     if (isInactiveRoute && filters.status !== 'inactive') {

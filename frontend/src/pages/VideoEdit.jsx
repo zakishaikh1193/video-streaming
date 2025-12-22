@@ -39,6 +39,14 @@ function VideoEdit() {
       const response = await api.get(`/videos/by-id/${id}`);
       const foundVideo = response.data;
       
+      // Log the size being fetched
+      console.log('[VideoEdit] fetchVideo - Received video data:', {
+        id: foundVideo?.id,
+        size: foundVideo?.size,
+        sizeMB: foundVideo?.size ? (foundVideo.size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A',
+        sizeType: typeof foundVideo?.size
+      });
+      
       if (foundVideo) {
         setVideo(foundVideo);
         
@@ -102,6 +110,9 @@ function VideoEdit() {
           lesson: foundVideo.lesson,
           module: foundVideo.module,
           version: foundVideo.version,
+          size: foundVideo.size,
+          sizeMB: foundVideo.size ? (foundVideo.size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A',
+          sizeType: typeof foundVideo.size,
           allKeys: Object.keys(foundVideo)
         });
       } else {
@@ -187,12 +198,157 @@ function VideoEdit() {
 
           if (replaceResponse.data.success) {
             setUploadProgress(100);
-            setSuccess('Video file replaced successfully!');
-            // Show popup and then redirect to videos page
-            setTimeout(() => {
-              alert('Video file replaced successfully!');
-              navigate('/admin/videos');
-            }, 500);
+            
+            // Immediately update video state with the new size from the response
+            // This ensures the UI updates immediately before any database fetch
+            const newSize = replaceResponse.data.video?.size || replaceResponse.data.file_size;
+            if (newSize) {
+              console.log('[VideoEdit] Updating video state with new size from replace response:', {
+                oldSize: video?.size,
+                oldSizeMB: video?.size ? (video.size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A',
+                newSize: newSize,
+                newSizeMB: (newSize / 1024 / 1024).toFixed(2) + ' MB',
+                responseVideo: replaceResponse.data.video,
+                responseFileSize: replaceResponse.data.file_size
+              });
+              
+              // Update video state immediately with new size - FORCE UPDATE
+              // This ensures the UI shows the new size immediately
+              if (replaceResponse.data.video) {
+                // Use the full video object from response (includes updated size)
+                console.log('[VideoEdit] Setting full video object from response:', {
+                  size: replaceResponse.data.video.size,
+                  sizeMB: (replaceResponse.data.video.size / 1024 / 1024).toFixed(2) + ' MB'
+                });
+                setVideo(replaceResponse.data.video);
+              } else {
+                // Update just the size if full video object not available
+                setVideo(prev => {
+                  if (!prev) {
+                    console.warn('[VideoEdit] No previous video state to update');
+                    return null;
+                  }
+                  const updated = { ...prev, size: newSize };
+                  console.log('[VideoEdit] Updated video state with new size:', {
+                    oldSize: prev.size,
+                    oldSizeMB: prev.size ? (prev.size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A',
+                    newSize: updated.size,
+                    newSizeMB: (updated.size / 1024 / 1024).toFixed(2) + ' MB'
+                  });
+                  return updated;
+                });
+              }
+              
+              // Force a re-render by updating state again (ensures UI updates)
+              setTimeout(() => {
+                setVideo(prev => {
+                  if (!prev) return null;
+                  // Ensure size is set from response
+                  const finalSize = replaceResponse.data.video?.size || replaceResponse.data.file_size || prev.size;
+                  if (prev.size !== finalSize) {
+                    console.log('[VideoEdit] Force updating size in state:', {
+                      prevSize: prev.size,
+                      finalSize: finalSize,
+                      finalSizeMB: (finalSize / 1024 / 1024).toFixed(2) + ' MB'
+                    });
+                    return { ...prev, size: finalSize };
+                  }
+                  return prev;
+                });
+              }, 100);
+            } else {
+              console.warn('[VideoEdit] No size in replace response:', replaceResponse.data);
+            }
+            
+            // After file replacement, update metadata (subject, grade, unit, lesson, module, version)
+            // Don't redirect yet - update metadata first
+            const updateData = { ...formData };
+            delete updateData.streaming_url;
+            delete updateData.file_path;
+            
+            // Ensure subject is sent (use subject if available, fallback to course)
+            if (updateData.subject) {
+              updateData.subject = updateData.subject;
+            } else if (updateData.course) {
+              updateData.subject = updateData.course;
+            }
+            
+            // Ensure module is sent (preserve empty strings as they might be valid)
+            // Convert empty strings to null only if we want to clear the field
+            if (updateData.module === '') {
+              updateData.module = null;
+            }
+            if (updateData.subject === '') {
+              updateData.subject = null;
+            }
+            if (updateData.unit === '') {
+              updateData.unit = null;
+            }
+            
+            // Handle version - support floating point numbers
+            if (updateData.version === '' || updateData.version === null || updateData.version === undefined) {
+              updateData.version = null;
+            } else {
+              // Convert string to number if it's a valid number (including floating point)
+              const versionStr = String(updateData.version).trim();
+              if (versionStr === '') {
+                updateData.version = null;
+              } else {
+                const versionNum = parseFloat(versionStr);
+                if (!isNaN(versionNum) && isFinite(versionNum)) {
+                  updateData.version = versionNum;
+                } else {
+                  updateData.version = versionStr;
+                }
+              }
+            }
+            
+            // Update metadata after file replacement
+            try {
+              await api.put(`/videos/${id}`, updateData);
+              // Wait a bit to ensure database is fully updated, then refresh video data
+              await new Promise(resolve => setTimeout(resolve, 500));
+              // Refresh video data to ensure we have the latest size from database
+              await fetchVideo();
+              // CRITICAL: Always use the size from replace response (actual file size) as the source of truth
+              const responseSize = replaceResponse.data.video?.size || replaceResponse.data.file_size;
+              if (responseSize) {
+                // Force update with response size to ensure accuracy (this is the actual file size on disk)
+                setVideo(prev => {
+                  if (!prev) return null;
+                  const currentSize = prev.size;
+                  if (currentSize !== responseSize) {
+                    console.log('[VideoEdit] Correcting size mismatch - using actual file size from response:', {
+                      currentSize: currentSize,
+                      currentSizeMB: currentSize ? (currentSize / 1024 / 1024).toFixed(2) + ' MB' : 'N/A',
+                      responseSize: responseSize,
+                      responseSizeMB: (responseSize / 1024 / 1024).toFixed(2) + ' MB'
+                    });
+                    return { ...prev, size: responseSize };
+                  }
+                  return prev;
+                });
+              }
+              setSuccess('Video file and details updated successfully!');
+              setTimeout(() => {
+                alert('Video file and details updated successfully!');
+                navigate('/admin/videos', { state: { refresh: true } });
+              }, 500);
+            } catch (updateErr) {
+              console.error('Failed to update metadata after file replacement:', updateErr);
+              setError('Video file replaced but failed to update details: ' + (updateErr.response?.data?.error || updateErr.message));
+              // Still refresh video data to show new file size, but use response size if available
+              try {
+                await fetchVideo();
+                // CRITICAL: Always use response size (actual file size) as source of truth
+                const responseSize = replaceResponse.data.video?.size || replaceResponse.data.file_size;
+                if (responseSize) {
+                  setVideo(prev => prev ? { ...prev, size: responseSize } : null);
+                }
+              } catch (fetchErr) {
+                console.error('Failed to fetch video after error:', fetchErr);
+              }
+            }
             return;
           }
         } catch (replaceErr) {
@@ -204,7 +360,7 @@ function VideoEdit() {
         }
       }
 
-      // Update video metadata
+      // Update video metadata (when no new file is being uploaded)
       const updateData = { ...formData };
       delete updateData.streaming_url;
       delete updateData.file_path;
@@ -262,9 +418,9 @@ function VideoEdit() {
 
       await api.put(`/videos/${id}`, updateData);
       setSuccess('Video updated successfully!');
-      // Show popup and then redirect to videos page
+      // Show popup and then redirect to videos page with refresh flag
       alert('Video updated successfully!');
-      navigate('/admin/videos');
+      navigate('/admin/videos', { state: { refresh: true } });
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to update video');
     } finally {

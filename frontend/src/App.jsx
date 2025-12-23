@@ -21,6 +21,7 @@ const VideosTrash = lazy(() => import('./pages/VideosTrash'));
 const CSVExport = lazy(() => import('./pages/CSVExport'));
 const MyStorageManager = lazy(() => import('./pages/CloudflareResourceManager'));
 const ShortUrlRedirect = lazy(() => import('./pages/ShortUrlRedirect'));
+const SelectChild = lazy(() => import('./pages/SelectChild'));
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
           <Route path="diagnostic" element={<StreamDiagnostic />} />
           <Route path="diagnostic/:videoId" element={<StreamDiagnostic />} />
           <Route path="admin/login" element={<AdminLogin />} />
+          <Route path="select-child" element={<SelectChild />} />
 
           <Route path="admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="admin/bulk-upload" element={<ProtectedRoute><BulkUpload /></ProtectedRoute>} />

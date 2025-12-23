@@ -2521,6 +2521,142 @@ export async function getFilterValues(req, res) {
 /**
  * Increment view count for a video
  */
+/**
+ * Backfill video durations for videos that have duration = 0
+ * This extracts duration from video files and updates the database
+ */
+export async function backfillVideoDurations(req, res) {
+  try {
+    console.log('[Backfill Durations] Starting duration backfill process...');
+    
+    // Get all videos with duration = 0 or NULL
+    const [videos] = await pool.execute(
+      `SELECT id, video_id, file_path, duration 
+       FROM videos 
+       WHERE (duration IS NULL OR duration = 0) 
+       AND file_path IS NOT NULL 
+       AND file_path != ''
+       AND status != 'deleted'
+       ORDER BY created_at DESC`
+    );
+    
+    console.log(`[Backfill Durations] Found ${videos.length} videos without duration`);
+    
+    if (videos.length === 0) {
+      return res.json({
+        success: true,
+        message: 'All videos already have duration values',
+        processed: 0,
+        updated: 0,
+        failed: 0
+      });
+    }
+    
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const videoStoragePath = path.join(__dirname, '../../video-storage');
+    
+    let updated = 0;
+    let failed = 0;
+    const results = [];
+    
+    // Process videos in batches to avoid overwhelming the system
+    const batchSize = 10;
+    for (let i = 0; i < videos.length; i += batchSize) {
+      const batch = videos.slice(i, i + batchSize);
+      
+      for (const video of batch) {
+        try {
+          // Construct full file path
+          let fullPath;
+          if (video.file_path.startsWith('/') || video.file_path.match(/^[A-Za-z]:/)) {
+            // Absolute path
+            fullPath = video.file_path;
+          } else {
+            // Relative path - try video-storage first, then upload directory
+            fullPath = path.join(videoStoragePath, video.file_path);
+            if (!fsSync.existsSync(fullPath)) {
+              // Try upload directory
+              const uploadPath = path.join(__dirname, '../../upload', video.file_path);
+              if (fsSync.existsSync(uploadPath)) {
+                fullPath = uploadPath;
+              }
+            }
+          }
+          
+          // Check if file exists
+          if (!fsSync.existsSync(fullPath)) {
+            console.warn(`[Backfill Durations] File not found for video ${video.video_id}: ${fullPath}`);
+            failed++;
+            results.push({
+              video_id: video.video_id,
+              status: 'failed',
+              reason: 'File not found'
+            });
+            continue;
+          }
+          
+          // Extract duration
+          const duration = await getVideoDuration(fullPath);
+          
+          if (duration > 0) {
+            // Update database
+            await pool.execute(
+              'UPDATE videos SET duration = ? WHERE id = ?',
+              [duration, video.id]
+            );
+            updated++;
+            results.push({
+              video_id: video.video_id,
+              status: 'updated',
+              duration: duration
+            });
+            console.log(`[Backfill Durations] ✓ Updated video ${video.video_id}: ${duration}s`);
+          } else {
+            failed++;
+            results.push({
+              video_id: video.video_id,
+              status: 'failed',
+              reason: 'Could not extract duration'
+            });
+            console.warn(`[Backfill Durations] ⚠ Could not extract duration for video ${video.video_id}`);
+          }
+        } catch (error) {
+          failed++;
+          results.push({
+            video_id: video.video_id,
+            status: 'failed',
+            reason: error.message
+          });
+          console.error(`[Backfill Durations] Error processing video ${video.video_id}:`, error.message);
+        }
+      }
+      
+      // Small delay between batches
+      if (i + batchSize < videos.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    console.log(`[Backfill Durations] Completed: ${updated} updated, ${failed} failed`);
+    
+    res.json({
+      success: true,
+      message: `Processed ${videos.length} videos`,
+      processed: videos.length,
+      updated: updated,
+      failed: failed,
+      results: results.slice(0, 50) // Return first 50 results to avoid huge response
+    });
+  } catch (error) {
+    console.error('[Backfill Durations] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
 export async function incrementVideoViews(req, res) {
   try {
     const { videoId } = req.params;
@@ -2633,10 +2769,15 @@ export async function generateFilteredVideosCSV(req, res) {
   try {
     const { subject, grade, unit, lesson, module, version } = req.query;
     
-    console.log('[Generate Filtered CSV] Filters:', { subject, grade, unit, lesson, module, version });
+    console.log('[Generate Filtered CSV] Starting CSV generation with filters:', { subject, grade, unit, lesson, module, version });
     
     // Build filters object
-    const filters = { status: 'active' };
+    // Note: getAllVideos has a max limit of 200 per page, so we'll fetch all pages
+    const filters = { 
+      status: 'active',
+      limit: 200, // Max allowed per page (getAllVideos caps at 200)
+      page: 1
+    };
     if (subject && subject !== 'all') {
       filters.subject = subject;
     }
@@ -2656,13 +2797,142 @@ export async function generateFilteredVideosCSV(req, res) {
       filters.version = version;
     }
     
-    // Get filtered videos - only include videos with redirect_slug (QR codes)
-    const allVideos = await videoService.getAllVideos(filters);
+    // Get filtered videos - handle paginated response format
+    // Use high limit to fetch all videos at once (or as many as possible)
+    let allVideosResponse;
+    try {
+      allVideosResponse = await videoService.getAllVideos(filters);
+      console.log('[Generate Filtered CSV] Initial response received:', {
+        isArray: Array.isArray(allVideosResponse),
+        hasVideos: !!(allVideosResponse && allVideosResponse.videos),
+        videoCount: Array.isArray(allVideosResponse) ? allVideosResponse.length : (allVideosResponse?.videos?.length || 0),
+        totalPages: allVideosResponse?.pagination?.totalPages || 1
+      });
+    } catch (fetchError) {
+      console.error('[Generate Filtered CSV] Error fetching videos:', fetchError);
+      return res.status(500).json({ 
+        error: 'Failed to fetch videos', 
+        message: fetchError.message 
+      });
+    }
+    
+    // Extract videos array from response (handle both old array format and new paginated format)
+    let allVideos = [];
+    if (Array.isArray(allVideosResponse)) {
+      // Old format - direct array
+      allVideos = allVideosResponse;
+    } else if (allVideosResponse && allVideosResponse.videos) {
+      // New format - object with videos and pagination
+      allVideos = Array.isArray(allVideosResponse.videos) ? allVideosResponse.videos : [];
+      
+      // Always fetch all pages to get complete data (since limit is capped at 200 per page)
+      const totalPages = allVideosResponse.pagination?.totalPages || 1;
+      const totalVideos = allVideosResponse.pagination?.total || allVideos.length;
+      
+      console.log(`[Generate Filtered CSV] Total videos: ${totalVideos}, Total pages: ${totalPages}, Current videos: ${allVideos.length}`);
+      
+      // Fetch all remaining pages - use both pagination info and fallback method
+      if (totalPages > 1) {
+        console.log(`[Generate Filtered CSV] Fetching all ${totalPages} pages of videos (limit: 200 per page)...`);
+        
+        for (let page = 2; page <= totalPages; page++) {
+          try {
+            const pageFilters = { ...filters, page, limit: 200 }; // Use 200 (max allowed)
+            const pageResponse = await videoService.getAllVideos(pageFilters);
+            
+            let pageVideos = [];
+            if (pageResponse && pageResponse.videos && Array.isArray(pageResponse.videos)) {
+              pageVideos = pageResponse.videos;
+            } else if (Array.isArray(pageResponse)) {
+              pageVideos = pageResponse;
+            }
+            
+            if (pageVideos.length > 0) {
+              allVideos.push(...pageVideos);
+              console.log(`[Generate Filtered CSV] ✓ Fetched page ${page}/${totalPages}: ${pageVideos.length} videos (total so far: ${allVideos.length})`);
+            } else {
+              console.log(`[Generate Filtered CSV] Page ${page} returned no videos, stopping pagination`);
+              break; // Stop if we get an empty page
+            }
+          } catch (pageError) {
+            console.error(`[Generate Filtered CSV] Error fetching page ${page}:`, pageError.message);
+            // Continue with other pages even if one fails
+          }
+        }
+      } else {
+        // Fallback: if pagination info says 1 page but we got less than expected, keep fetching
+        if (totalVideos > allVideos.length && allVideos.length === 200) {
+          console.log(`[Generate Filtered CSV] Got 200 videos but total is ${totalVideos}, fetching additional pages...`);
+          let page = 2;
+          let hasMore = true;
+          
+          while (hasMore && page <= 20) { // Safety limit of 20 pages
+            try {
+              const pageFilters = { ...filters, page, limit: 200 };
+              const pageResponse = await videoService.getAllVideos(pageFilters);
+              
+              let pageVideos = [];
+              if (pageResponse && pageResponse.videos && Array.isArray(pageResponse.videos)) {
+                pageVideos = pageResponse.videos;
+              } else if (Array.isArray(pageResponse)) {
+                pageVideos = pageResponse;
+              }
+              
+              if (pageVideos.length > 0) {
+                allVideos.push(...pageVideos);
+                console.log(`[Generate Filtered CSV] ✓ Fetched additional page ${page}: ${pageVideos.length} videos (total so far: ${allVideos.length})`);
+                page++;
+              } else {
+                hasMore = false;
+                console.log(`[Generate Filtered CSV] No more videos found, stopping at page ${page}`);
+              }
+            } catch (pageError) {
+              console.error(`[Generate Filtered CSV] Error fetching page ${page}:`, pageError.message);
+              hasMore = false;
+            }
+          }
+        }
+      }
+    } else {
+      console.warn('[Generate Filtered CSV] Unexpected response format from getAllVideos:', typeof allVideosResponse);
+    }
+    
+    console.log(`[Generate Filtered CSV] ===== FETCH SUMMARY =====`);
+    console.log(`[Generate Filtered CSV] Total videos fetched: ${allVideos.length}`);
+    
+    // Verify we got all videos (compare with expected total)
+    if (allVideosResponse?.pagination?.total) {
+      const expectedTotal = allVideosResponse.pagination.total;
+      console.log(`[Generate Filtered CSV] Expected total: ${expectedTotal}`);
+      if (allVideos.length < expectedTotal) {
+        console.warn(`[Generate Filtered CSV] ⚠️ WARNING: Fetched ${allVideos.length} videos but expected ${expectedTotal}. Some videos may be missing in CSV.`);
+      } else {
+        console.log(`[Generate Filtered CSV] ✓ Successfully fetched all ${allVideos.length} videos (matches expected ${expectedTotal})`);
+      }
+    } else {
+      console.log(`[Generate Filtered CSV] No pagination info available, using ${allVideos.length} fetched videos`);
+    }
+    console.log(`[Generate Filtered CSV] ==========================`);
+    
+    // Ensure allVideos is an array before filtering
+    if (!Array.isArray(allVideos)) {
+      console.error('[Generate Filtered CSV] allVideos is not an array:', typeof allVideos);
+      allVideos = [];
+    }
     
     // Filter to only videos with redirect_slug (QR codes) - same as QR Code Storage
-    const videos = allVideos.filter(video => 
-      video.redirect_slug && video.redirect_slug.trim() !== ''
-    );
+    const videos = allVideos.filter(video => {
+      if (!video || typeof video !== 'object') {
+        return false;
+      }
+      return video.redirect_slug && String(video.redirect_slug).trim() !== '';
+    });
+    
+    console.log(`[Generate Filtered CSV] ===== FILTERING SUMMARY =====`);
+    console.log(`[Generate Filtered CSV] Total videos fetched: ${allVideos.length}`);
+    console.log(`[Generate Filtered CSV] Videos with redirect_slug: ${videos.length}`);
+    console.log(`[Generate Filtered CSV] Videos without redirect_slug (excluded): ${allVideos.length - videos.length}`);
+    console.log(`[Generate Filtered CSV] =============================`);
     
     if (videos.length === 0) {
       return res.status(400).json({ error: 'No videos found matching the selected filters' });
@@ -2674,112 +2944,173 @@ export async function generateFilteredVideosCSV(req, res) {
     // Build base URL - use frontend URL (same as video page)
     const frontendUrl = config.urls?.frontend || config.urls?.base || 'http://localhost:5173';
     
-    // Build rows from videos
-    const rows = videos.map(video => {
-      // Subject
-      const subjectValue = video.subject || video.course || '';
-      
-      // Grade
-      const gradeValue = video.grade || '';
-      
-      // Unit
-      const unitValue = video.unit || '';
-      
-      // Lesson
-      const lessonValue = video.lesson || '';
-      
-      // QR code name - generate filename in format G{grade}_U{unit}_L{lesson}_M{module}_V{version}.svg (same as download)
-      // This matches the exact filename format used when downloading QR codes from QR Code Storage
-      // Format: G1_U1_L1_M1_V1.1.svg - this is the QR code download filename with .svg extension
-      // Order: Grade, Unit, Lesson, Module, Version (G_U_L_M_V)
-      // Version is critical to differentiate between videos with same metadata but different versions
-      const parts = [];
-      if (video.grade !== null && video.grade !== undefined && String(video.grade).trim() !== '') {
-        parts.push(`G${video.grade}`);
+    // Build rows from videos with error handling
+    const rows = videos.map((video, index) => {
+      try {
+        if (!video || typeof video !== 'object') {
+          console.warn(`[Generate Filtered CSV] Invalid video at index ${index}`);
+          return null;
+        }
+        
+        // Subject
+        const subjectValue = video.subject || video.course || '';
+        
+        // Grade
+        const gradeValue = video.grade != null ? String(video.grade) : '';
+        
+        // Unit
+        const unitValue = video.unit != null ? String(video.unit) : '';
+        
+        // Lesson
+        const lessonValue = video.lesson != null ? String(video.lesson) : '';
+        
+        // QR code name - generate filename in format G{grade}_U{unit}_L{lesson}_M{module}_V{version}.svg (same as download)
+        // This matches the exact filename format used when downloading QR codes from QR Code Storage
+        // Format: G1_U1_L1_M1_V1.1.svg - this is the QR code download filename with .svg extension
+        // Order: Grade, Unit, Lesson, Module, Version (G_U_L_M_V)
+        // Version is critical to differentiate between videos with same metadata but different versions
+        const parts = [];
+        if (video.grade !== null && video.grade !== undefined && String(video.grade).trim() !== '') {
+          parts.push(`G${String(video.grade).trim()}`);
+        }
+        // Use unit field for U part (not course/subject)
+        if (video.unit !== null && video.unit !== undefined && String(video.unit).trim() !== '') {
+          parts.push(`U${String(video.unit).trim()}`);
+        }
+        if (video.lesson !== null && video.lesson !== undefined && String(video.lesson).trim() !== '') {
+          parts.push(`L${String(video.lesson).trim()}`);
+        }
+        if (video.module !== null && video.module !== undefined && String(video.module).trim() !== '') {
+          parts.push(`M${String(video.module).trim()}`);
+        }
+        if (video.version !== null && video.version !== undefined && String(video.version).trim() !== '') {
+          parts.push(`V${String(video.version).trim()}`); // Add version to differentiate between versions
+        }
+        
+        // Always use the format with .svg extension (matches QR code download filename exactly)
+        // This is the actual QR code download filename format, NOT video_id
+        // Format: G{grade}_U{unit}_L{lesson}_M{module}_V{version}.svg (Order: G_U_L_M_V)
+        const qrCodeName = parts.length > 0 
+          ? parts.join('_') + '.svg'
+          : ''; // Empty if no parts (don't use video_id - user wants QR code download name format only)
+        
+        // Playlist ID - use redirect_slug or video_id
+        const playlistId = video.redirect_slug || video.video_id || '';
+        
+        // PlaylistTitle - use title
+        const playlistTitle = video.title || video.video_id || 'Untitled';
+        
+        // Description
+        const description = video.description || '';
+        
+        // Short URL - use the format from video edit page: {frontendUrl}/{redirect_slug}
+        // This matches the "SHORT URL" shown in the video edit page (e.g., http://localhost:5173/gpg2i6w6fj)
+        const shortUrl = video.redirect_slug 
+          ? `${frontendUrl}/${String(video.redirect_slug).trim()}`
+          : (video.video_id ? `${frontendUrl}/stream/${video.video_id}` : '');
+        
+        return [
+          subjectValue,
+          gradeValue,
+          unitValue,
+          lessonValue,
+          qrCodeName,
+          playlistId,
+          playlistTitle,
+          description,
+          shortUrl
+        ];
+      } catch (rowError) {
+        console.error(`[Generate Filtered CSV] Error processing video at index ${index}:`, rowError.message);
+        // Return a row with error indicator instead of crashing
+        return [
+          'ERROR',
+          video?.video_id || 'UNKNOWN',
+          'Error processing video',
+          '',
+          '',
+          '',
+          '',
+          '',
+          ''
+        ];
       }
-      // Use unit field for U part (not course/subject)
-      if (video.unit !== null && video.unit !== undefined && String(video.unit).trim() !== '') {
-        parts.push(`U${video.unit}`);
-      }
-      if (video.lesson !== null && video.lesson !== undefined && String(video.lesson).trim() !== '') {
-        parts.push(`L${video.lesson}`);
-      }
-      if (video.module !== null && video.module !== undefined && String(video.module).trim() !== '') {
-        parts.push(`M${video.module}`);
-      }
-      if (video.version !== null && video.version !== undefined && String(video.version).trim() !== '') {
-        parts.push(`V${video.version}`); // Add version to differentiate between versions
-      }
-      
-      // Always use the format with .svg extension (matches QR code download filename exactly)
-      // This is the actual QR code download filename format, NOT video_id
-      // Format: G{grade}_U{unit}_L{lesson}_M{module}_V{version}.svg (Order: G_U_L_M_V)
-      const qrCodeName = parts.length > 0 
-        ? parts.join('_') + '.svg'
-        : ''; // Empty if no parts (don't use video_id - user wants QR code download name format only)
-      
-      // Debug log to verify format
-      console.log(`[CSV Export] Video ${video.video_id}: QR code name = ${qrCodeName}, unit = ${video.unit}, grade = ${video.grade}, lesson = ${video.lesson}, module = ${video.module}, version = ${video.version}`);
-      
-      // Playlist ID - use redirect_slug or video_id
-      const playlistId = video.redirect_slug || video.video_id || '';
-      
-      // PlaylistTitle - use title
-      const playlistTitle = video.title || video.video_id || 'Untitled';
-      
-      // Description
-      const description = video.description || '';
-      
-      // Short URL - use the format from video edit page: {frontendUrl}/{redirect_slug}
-      // This matches the "SHORT URL" shown in the video edit page (e.g., http://localhost:5173/gpg2i6w6fj)
-      const shortUrl = video.redirect_slug 
-        ? `${frontendUrl}/${video.redirect_slug}`
-        : `${frontendUrl}/stream/${video.video_id}`;
-      
-      return [
-        subjectValue,
-        gradeValue,
-        unitValue,
-        lessonValue,
-        qrCodeName,
-        playlistId,
-        playlistTitle,
-        description,
-        shortUrl
-      ];
-    });
+    }).filter(row => row !== null); // Remove any null rows
 
+    // Validate rows before generating CSV
+    if (!rows || rows.length === 0) {
+      console.error('[Generate Filtered CSV] No rows to generate CSV');
+      return res.status(400).json({ error: 'No data available to generate CSV' });
+    }
+    
     // Escape CSV values
     const escapeCSV = (value) => {
-      const cellStr = String(value || '').trim();
-      if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n') || cellStr.includes('\r')) {
-        return `"${cellStr.replace(/"/g, '""')}"`;
+      try {
+        const cellStr = String(value != null ? value : '').trim();
+        if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n') || cellStr.includes('\r')) {
+          return `"${cellStr.replace(/"/g, '""')}"`;
+        }
+        return cellStr;
+      } catch (escapeError) {
+        console.warn('[Generate Filtered CSV] Error escaping CSV value:', escapeError);
+        return '';
       }
-      return cellStr;
     };
 
-    // Build CSV content
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(escapeCSV).join(','))
-    ].join('\r\n');
+    // Build CSV content with error handling
+    let csvContent;
+    try {
+      const headerRow = headers.map(escapeCSV).join(',');
+      const dataRows = rows.map(row => {
+        if (!Array.isArray(row) || row.length !== headers.length) {
+          console.warn('[Generate Filtered CSV] Invalid row format:', row);
+          // Return a row with empty values matching header count
+          return headers.map(() => '').map(escapeCSV).join(',');
+        }
+        return row.map(escapeCSV).join(',');
+      });
+      
+      csvContent = [headerRow, ...dataRows].join('\r\n');
+    } catch (csvError) {
+      console.error('[Generate Filtered CSV] Error building CSV content:', csvError);
+      return res.status(500).json({ 
+        error: 'Failed to generate CSV content', 
+        message: csvError.message 
+      });
+    }
 
     // Generate filename with filters
     let filename = 'videos_export';
-    if (subject && subject !== 'all') filename += `_subject_${subject}`;
-    if (grade && grade !== 'all') filename += `_grade_${grade}`;
-    if (unit && unit !== 'all') filename += `_unit_${unit}`;
-    if (lesson && lesson !== 'all') filename += `_lesson_${lesson}`;
+    if (subject && subject !== 'all') filename += `_subject_${String(subject).replace(/[^a-zA-Z0-9]/g, '_')}`;
+    if (grade && grade !== 'all') filename += `_grade_${String(grade).replace(/[^a-zA-Z0-9]/g, '_')}`;
+    if (unit && unit !== 'all') filename += `_unit_${String(unit).replace(/[^a-zA-Z0-9]/g, '_')}`;
+    if (lesson && lesson !== 'all') filename += `_lesson_${String(lesson).replace(/[^a-zA-Z0-9]/g, '_')}`;
     filename += `_${Date.now()}.csv`;
 
-    // Set response headers for CSV download
-    res.setHeader('Content-Type', 'text/csv;charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    
-    // Send CSV with BOM for Excel compatibility
-    res.send('\ufeff' + csvContent);
-    
-    console.log(`[Generate Filtered CSV] Generated CSV with ${videos.length} videos`);
+    try {
+      // Set response headers for CSV download
+      res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      
+      // Send CSV with BOM for Excel compatibility
+      res.send('\ufeff' + csvContent);
+      
+      console.log(`[Generate Filtered CSV] ===== CSV GENERATION COMPLETE =====`);
+      console.log(`[Generate Filtered CSV] ✓ Successfully generated CSV`);
+      console.log(`[Generate Filtered CSV] Total rows in CSV: ${rows.length}`);
+      console.log(`[Generate Filtered CSV] Headers: ${headers.length}`);
+      console.log(`[Generate Filtered CSV] Filename: ${filename}`);
+      console.log(`[Generate Filtered CSV] ====================================`);
+    } catch (sendError) {
+      console.error('[Generate Filtered CSV] Error sending CSV response:', sendError);
+      // If headers already sent, we can't send error response
+      if (!res.headersSent) {
+        return res.status(500).json({ 
+          error: 'Failed to send CSV file', 
+          message: sendError.message 
+        });
+      }
+    }
   } catch (error) {
     console.error('[Generate Filtered CSV] Error:', error);
     res.status(500).json({ 

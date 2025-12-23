@@ -40,6 +40,7 @@ function AdminDashboard() {
   const [uploadActivity, setUploadActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [backfilling, setBackfilling] = useState(false);
 
   useEffect(() => {
     fetchDashboardData();
@@ -93,20 +94,37 @@ function AdminDashboard() {
       const totalSize = validVideos.reduce((sum, v) => sum + (Number(v.size) || 0), 0);
       
       // Calculate total duration - ensure duration is parsed as number (stored in seconds)
+      // Handle various formats: number, string, null, undefined
       const totalDuration = validVideos.reduce((sum, v) => {
-        const duration = Number(v.duration) || 0;
+        let duration = 0;
+        if (v.duration !== null && v.duration !== undefined) {
+          // Try to parse as number
+          const parsed = Number(v.duration);
+          if (!isNaN(parsed) && parsed > 0) {
+            duration = parsed;
+          }
+        }
         return sum + duration;
       }, 0);
       
+      const videosWithDuration = validVideos.filter(v => {
+        const d = Number(v.duration) || 0;
+        return d > 0;
+      }).length;
+      
       console.log('[Dashboard] Duration calculation:', {
         totalVideos: validVideos.length,
-        videosWithDuration: validVideos.filter(v => v.duration && Number(v.duration) > 0).length,
+        videosWithDuration: videosWithDuration,
+        videosWithoutDuration: validVideos.length - videosWithDuration,
         totalDurationSeconds: totalDuration,
-        sampleDurations: validVideos.slice(0, 5).map(v => ({ 
+        totalDurationMinutes: Math.round(totalDuration / 60),
+        totalDurationHours: Math.round(totalDuration / 3600),
+        sampleDurations: validVideos.slice(0, 10).map(v => ({ 
           video_id: v.video_id, 
+          title: v.title?.substring(0, 30),
           duration: v.duration, 
           durationType: typeof v.duration,
-          durationNumber: Number(v.duration) 
+          durationNumber: Number(v.duration) || 0
         }))
       });
       const videosWithCaptions = videos.filter(v => v.captions && v.captions.length > 0).length;
@@ -186,8 +204,15 @@ function AdminDashboard() {
   };
 
   const formatDuration = (seconds) => {
-    // Ensure seconds is a number
-    const totalSeconds = Number(seconds) || 0;
+    // Ensure seconds is a number - handle various input types
+    let totalSeconds = 0;
+    if (seconds !== null && seconds !== undefined) {
+      const parsed = Number(seconds);
+      if (!isNaN(parsed) && parsed >= 0) {
+        totalSeconds = Math.round(parsed);
+      }
+    }
+    
     if (totalSeconds === 0) return '0 min';
     
     const hours = Math.floor(totalSeconds / 3600);
@@ -199,9 +224,15 @@ function AdminDashboard() {
       if (minutes > 0) {
         return `${hours}h ${minutes}m`;
       }
+      if (secs > 0) {
+        return `${hours}h ${secs}s`;
+      }
       return `${hours}h`;
     }
     if (minutes > 0) {
+      if (secs > 0) {
+        return `${minutes}m ${secs}s`;
+      }
       return `${minutes} min`;
     }
     return `${secs} sec`;
@@ -211,6 +242,30 @@ function AdminDashboard() {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const handleBackfillDurations = async () => {
+    if (!confirm('This will extract durations from all video files. This may take several minutes. Continue?')) {
+      return;
+    }
+    
+    try {
+      setBackfilling(true);
+      const response = await api.post('/videos/backfill-durations');
+      
+      if (response.data.success) {
+        alert(`Successfully updated ${response.data.updated} videos. ${response.data.failed} failed.`);
+        // Refresh dashboard data
+        await fetchDashboardData();
+      } else {
+        alert('Backfill completed with errors. Check console for details.');
+      }
+    } catch (err) {
+      console.error('Failed to backfill durations:', err);
+      alert('Failed to backfill durations: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setBackfilling(false);
+    }
   };
 
   // Calculate upload activity statistics
@@ -342,6 +397,15 @@ function AdminDashboard() {
             </div>
             <div className="text-4xl font-bold text-slate-900 mb-2">{formatDuration(stats.totalDuration)}</div>
             <div className="text-sm text-slate-600">Combined video length</div>
+            {stats.totalDuration === 0 && (
+              <button
+                onClick={handleBackfillDurations}
+                disabled={backfilling}
+                className="mt-3 w-full px-3 py-2 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {backfilling ? 'Processing...' : 'Extract Durations'}
+              </button>
+            )}
           </div>
         </div>
 

@@ -37,6 +37,9 @@ router.use((req, res, next) => {
 router.get('/', videoController.getAllVideos);
 router.get('/filters', videoController.getFilterValues);
 
+// Backfill durations route (must be before ALL parameterized routes like /:id or /:videoId)
+router.post('/backfill-durations', authenticateToken, videoController.backfillVideoDurations);
+
 // Get video by database ID (protected route) - MUST be before /:videoId routes
 router.get('/by-id/:id', (req, res, next) => {
   console.log('[VideoRouter] /by-id/:id route matched!', {
@@ -115,6 +118,15 @@ router.get('/qr-codes', (req, res, next) => {
 }, authenticateToken, videoController.getAllQRCodes);
 router.get('/thumbnails', authenticateToken, thumbnailController.getThumbnails);
 router.get('/thumbnails/diagnostic', authenticateToken, thumbnailController.getThumbnailDiagnostic);
+
+// Test endpoint to verify backfill route exists (for debugging)
+router.get('/backfill-durations-test', (req, res) => {
+  res.json({ 
+    message: 'Backfill durations route is registered',
+    method: 'POST /api/videos/backfill-durations',
+    requiresAuth: true
+  });
+});
 router.get('/export-csv', authenticateToken, videoController.generateVideosCSV);
 router.get('/export-filtered-csv', (req, res, next) => {
   console.log('[Route] /export-filtered-csv route hit');

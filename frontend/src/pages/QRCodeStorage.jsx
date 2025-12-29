@@ -80,6 +80,11 @@ function QRCodeStorage() {
     loadFilterOptions();
   }, []);
 
+  // Reload filter options when subject changes (including when reset to 'all')
+  useEffect(() => {
+    loadFilterOptions(selectedFilters.subject);
+  }, [selectedFilters.subject]);
+
   useEffect(() => {
     filterQRCodes();
   }, [searchTerm, selectedFilter, selectedFilters, qrCodes]);
@@ -128,9 +133,16 @@ function QRCodeStorage() {
     }
   };
 
-  const loadFilterOptions = async () => {
+  const loadFilterOptions = async (subject = null) => {
     try {
-      const response = await api.get('/videos/filters');
+      // Pass subject filter to get filtered options
+      // Use provided subject parameter or current state
+      const currentSubject = subject !== null ? subject : selectedFilters.subject;
+      const params = {};
+      if (currentSubject && currentSubject !== 'all') {
+        params.subject = currentSubject;
+      }
+      const response = await api.get('/videos/filters', { params });
       if (response.data) {
         setFilterOptions({
           subjects: response.data.subjects || [],
@@ -652,7 +664,21 @@ function QRCodeStorage() {
                 </label>
                 <select
                   value={selectedFilters.subject}
-                  onChange={(e) => setSelectedFilters(prev => ({ ...prev, subject: e.target.value }))}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedFilters(prev => {
+                      const newFilters = { ...prev, subject: value };
+                      // Reset dependent filters when subject changes
+                      if (value === 'all' || prev.subject !== value) {
+                        newFilters.grade = 'all';
+                        newFilters.unit = 'all';
+                        newFilters.lesson = 'all';
+                        newFilters.module = 'all';
+                        newFilters.version = 'all';
+                      }
+                      return newFilters;
+                    });
+                  }}
                   className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-slate-300 transition-all text-[15px] font-medium cursor-pointer"
                 >
                   <option value="all">All Subjects</option>

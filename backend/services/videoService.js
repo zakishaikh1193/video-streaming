@@ -971,13 +971,24 @@ export async function getAllVideos(filters = {}) {
 /**
  * Get unique filter values for dropdowns
  */
-export async function getFilterValues() {
+export async function getFilterValues(subjectFilter = null) {
   try {
+    // Build base WHERE clause - if subject filter exists, include it with AND for additional conditions
+    // If no subject filter, just use WHERE for additional conditions
+    let baseWhere = '';
+    const queryParams = [];
+    if (subjectFilter && subjectFilter.trim()) {
+      baseWhere = 'WHERE LOWER(TRIM(subject)) = LOWER(TRIM(?)) AND';
+      queryParams.push(subjectFilter.trim());
+    } else {
+      baseWhere = 'WHERE';
+    }
+    
     // Try to get unit column, fallback if it doesn't exist
-    let unitsQuery = 'SELECT DISTINCT unit FROM videos WHERE unit IS NOT NULL AND unit != "" ORDER BY unit ASC';
+    let unitsQuery = `SELECT DISTINCT unit FROM videos ${baseWhere} unit IS NOT NULL AND unit != "" ORDER BY unit ASC`;
     let units = [];
     try {
-      const [unitsRows] = await pool.execute(unitsQuery);
+      const [unitsRows] = await pool.execute(unitsQuery, queryParams);
       units = unitsRows.map(row => row.unit).filter(Boolean);
     } catch (unitError) {
       console.log('[getFilterValues] Unit column not found, skipping');
@@ -985,21 +996,21 @@ export async function getFilterValues() {
 
     const queries = {
       subjects: 'SELECT DISTINCT subject FROM videos WHERE subject IS NOT NULL AND subject != "" ORDER BY subject ASC',
-      grades: 'SELECT DISTINCT grade FROM videos WHERE grade IS NOT NULL AND grade != "" ORDER BY grade ASC',
-      lessons: 'SELECT DISTINCT lesson FROM videos WHERE lesson IS NOT NULL AND lesson != "" ORDER BY lesson ASC',
-      modules: 'SELECT DISTINCT module FROM videos WHERE module IS NOT NULL AND module != "" ORDER BY module ASC',
-      versions: 'SELECT DISTINCT version FROM videos WHERE version IS NOT NULL ORDER BY CAST(version AS DECIMAL(10,2)) ASC'
+      grades: `SELECT DISTINCT grade FROM videos ${baseWhere} grade IS NOT NULL AND grade != "" ORDER BY grade ASC`,
+      lessons: `SELECT DISTINCT lesson FROM videos ${baseWhere} lesson IS NOT NULL AND lesson != "" ORDER BY lesson ASC`,
+      modules: `SELECT DISTINCT module FROM videos ${baseWhere} module IS NOT NULL AND module != "" ORDER BY module ASC`,
+      versions: `SELECT DISTINCT version FROM videos ${baseWhere} version IS NOT NULL ORDER BY CAST(version AS DECIMAL(10,2)) ASC`
     };
 
     const [subjects] = await pool.execute(queries.subjects);
-    const [grades] = await pool.execute(queries.grades);
-    const [lessons] = await pool.execute(queries.lessons);
-    const [modules] = await pool.execute(queries.modules);
+    const [grades] = await pool.execute(queries.grades, queryParams);
+    const [lessons] = await pool.execute(queries.lessons, queryParams);
+    const [modules] = await pool.execute(queries.modules, queryParams);
     
     // Get versions - handle both numeric and string versions
     let versions = [];
     try {
-      const [versionsRows] = await pool.execute(queries.versions);
+      const [versionsRows] = await pool.execute(queries.versions, queryParams);
       versions = versionsRows.map(row => String(row.version)).filter(Boolean);
       // Sort versions numerically (handles floating point)
       versions.sort((a, b) => {

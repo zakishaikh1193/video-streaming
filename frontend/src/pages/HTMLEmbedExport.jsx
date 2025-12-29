@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Download, Filter, FileSpreadsheet, AlertCircle, Loader } from 'lucide-react';
+import { Download, Filter, FileCode, AlertCircle, Loader } from 'lucide-react';
 import api from '../services/api';
 
-function CSVExport() {
+function HTMLEmbedExport() {
   const [filterValues, setFilterValues] = useState({
     subjects: [],
     grades: [],
@@ -32,7 +32,6 @@ function CSVExport() {
   // Reload filter options when subject changes (including when reset to 'all')
   useEffect(() => {
     loadFilterValues(selectedFilters.subject);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFilters.subject]);
 
   useEffect(() => {
@@ -75,7 +74,6 @@ function CSVExport() {
   const countVideos = async () => {
     try {
       setCounting(true);
-      // Build filters exactly like the CSV export endpoint
       const params = {};
       if (selectedFilters.subject !== 'all') {
         params.subject = selectedFilters.subject;
@@ -96,32 +94,24 @@ function CSVExport() {
         params.version = selectedFilters.version;
       }
 
-      // Use the same endpoint logic as CSV export - get filtered videos
-      // This ensures the count matches exactly what will be in the CSV
-      // Fetch with high limit to get all videos for accurate count
       const response = await api.get('/videos', { 
         params: {
           ...params,
-          status: 'active', // Only count active videos (same as CSV export)
-          limit: 10000 // High limit to get all videos
+          status: 'active',
+          limit: 10000
         }
       });
       
-      // Handle both old format (array) and new format (object with videos and pagination)
       let videos = [];
       if (Array.isArray(response.data)) {
-        // Old format - just an array
         videos = response.data;
       } else if (response.data && response.data.videos) {
-        // New format - object with videos and pagination
         videos = response.data.videos || [];
         
-        // If pagination exists and there are more pages, fetch all pages
         const pagination = response.data.pagination;
         if (pagination && pagination.totalPages > 1) {
           const allVideos = [...videos];
           
-          // Fetch remaining pages
           for (let page = 2; page <= pagination.totalPages; page++) {
             const pageResponse = await api.get('/videos', {
               params: {
@@ -141,11 +131,8 @@ function CSVExport() {
           
           videos = allVideos;
         }
-      } else {
-        videos = [];
       }
       
-      // Count only videos that have redirect_slug (QR codes) - same as CSV export should include
       const videosWithQR = videos.filter(video => 
         video.redirect_slug && video.redirect_slug.trim() !== ''
       );
@@ -159,7 +146,7 @@ function CSVExport() {
     }
   };
 
-  const handleDownloadCSV = async () => {
+  const handleDownloadHTML = async () => {
     try {
       setDownloading(true);
       setError(null);
@@ -185,47 +172,67 @@ function CSVExport() {
         params.version = selectedFilters.version;
       }
 
-      // Download CSV
-      const response = await api.get('/videos/export-filtered-csv', {
-        params: params,
-        responseType: 'blob'
+      // Fetch HTML files from backend
+      const response = await api.get('/videos/export-html-embeds', {
+        params: params
       });
 
-      // Create download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
+      if (!response.data.success || !response.data.files || response.data.files.length === 0) {
+        throw new Error('No HTML files generated');
+      }
+
+      // Check if browser supports File System Access API (for folder selection)
+      if ('showDirectoryPicker' in window) {
+        // Modern browsers: Allow user to select folder
+        try {
+          const directoryHandle = await window.showDirectoryPicker({
+            mode: 'readwrite'
+          });
+          
+          // Save all HTML files to selected folder
+          for (const file of response.data.files) {
+            const fileHandle = await directoryHandle.getFileHandle(file.filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(file.content);
+            await writable.close();
+          }
+          
+          alert(`Successfully saved ${response.data.files.length} HTML files to the selected folder!`);
+          return;
+        } catch (folderError) {
+          if (folderError.name === 'AbortError') {
+            // User cancelled folder selection
+            return;
+          }
+          console.warn('Folder selection failed, falling back to individual downloads:', folderError);
+          // Fall through to individual file downloads
+        }
+      }
+
+      // Fallback: Download individual HTML files
+      // Download files one by one with a small delay to avoid browser blocking
+      for (let i = 0; i < response.data.files.length; i++) {
+        const file = response.data.files[i];
+        const blob = new Blob([file.content], { type: 'text/html' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', file.filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        
+        // Small delay between downloads to avoid browser blocking
+        if (i < response.data.files.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
       
-      // Generate filename
-      let filename = 'videos_export';
-      if (selectedFilters.subject !== 'all') {
-        filename += `_subject_${selectedFilters.subject}`;
-      }
-      if (selectedFilters.grade !== 'all') {
-        filename += `_grade_${selectedFilters.grade}`;
-      }
-      if (selectedFilters.unit !== 'all') {
-        filename += `_unit_${selectedFilters.unit}`;
-      }
-      if (selectedFilters.lesson !== 'all') {
-        filename += `_lesson_${selectedFilters.lesson}`;
-      }
-      if (selectedFilters.module !== 'all') {
-        filename += `_module_${selectedFilters.module}`;
-      }
-      if (selectedFilters.version !== 'all') {
-        filename += `_version_${selectedFilters.version}`;
-      }
-      filename += `_${Date.now()}.csv`;
-      
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      alert(`Downloaded ${response.data.files.length} HTML files!`);
     } catch (err) {
-      console.error('Failed to download CSV:', err);
-      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to download CSV';
+      console.error('Failed to download HTML embeds:', err);
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to download HTML embed files';
       setError(errorMessage);
     } finally {
       setDownloading(false);
@@ -277,12 +284,12 @@ function CSVExport() {
         {/* Header Container */}
         <div className="mb-8 lg:mb-10">
           <div className="flex items-center gap-4 mb-3">
-            <div className="p-3 bg-gradient-to-br from-green-500 via-emerald-500 to-teal-600 rounded-2xl shadow-xl shadow-green-500/20">
-              <FileSpreadsheet className="w-8 h-8 text-white" />
+            <div className="p-3 bg-gradient-to-br from-purple-500 via-indigo-500 to-blue-600 rounded-2xl shadow-xl shadow-purple-500/20">
+              <FileCode className="w-8 h-8 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">CSV Export</h1>
-              <p className="text-slate-600 text-base sm:text-lg">Export videos to CSV with filters by Subject, Grade, Unit, Lesson, Module, and Version</p>
+              <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">HTML Embed Export</h1>
+              
             </div>
           </div>
         </div>
@@ -418,7 +425,6 @@ function CSVExport() {
                 {filterValues.modules
                   .filter(m => m !== null && m !== undefined && String(m).trim() !== '')
                   .sort((a, b) => {
-                    // Try to sort numerically first, then alphabetically
                     const numA = Number(a);
                     const numB = Number(b);
                     if (!isNaN(numA) && !isNaN(numB)) {
@@ -448,7 +454,6 @@ function CSVExport() {
                 {filterValues.versions
                   .filter(v => v !== null && v !== undefined && String(v).trim() !== '')
                   .sort((a, b) => {
-                    // Sort versions numerically (handles floating point)
                     const numA = parseFloat(a);
                     const numB = parseFloat(b);
                     if (!isNaN(numA) && !isNaN(numB)) {
@@ -468,14 +473,14 @@ function CSVExport() {
           {/* Filter Summary and Actions */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-6 border-t-2 border-slate-200">
             <div className="flex items-center gap-4">
-              <div className="px-5 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border-2 border-blue-200 shadow-sm">
+              <div className="px-5 py-3 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-200 shadow-sm">
                 {counting ? (
                   <div className="flex items-center gap-2">
-                    <Loader className="w-4 h-4 animate-spin text-blue-600" />
-                    <span className="text-sm font-bold text-blue-700">Counting...</span>
+                    <Loader className="w-4 h-4 animate-spin text-purple-600" />
+                    <span className="text-sm font-bold text-purple-700">Counting...</span>
                   </div>
                 ) : (
-                  <span className="text-sm font-bold text-blue-700">
+                  <span className="text-sm font-bold text-purple-700">
                     {videoCount} {videoCount === 1 ? 'Video' : 'Videos'} Found
                   </span>
                 )}
@@ -490,31 +495,31 @@ function CSVExport() {
               )}
             </div>
             <button
-              onClick={handleDownloadCSV}
+              onClick={handleDownloadHTML}
               disabled={downloading || videoCount === 0}
-              className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all font-bold text-sm shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl hover:from-purple-700 hover:to-indigo-700 transition-all font-bold text-sm shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
               {downloading ? (
                 <>
                   <Loader className="w-5 h-5 animate-spin" />
-                  <span>Generating CSV...</span>
+                  <span>Downloading HTML Files...</span>
                 </>
               ) : (
                 <>
                   <Download className="w-5 h-5" />
-                  <span>Download CSV</span>
+                  <span>Download HTML Files</span>
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* CSV Format Info */}
+        {/* Info Section */}
         
       </div>
     </div>
   );
 }
 
-export default CSVExport;
+export default HTMLEmbedExport;
 

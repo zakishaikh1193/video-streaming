@@ -2505,7 +2505,9 @@ export async function getVideoDiagnostic(req, res) {
 
 export async function getFilterValues(req, res) {
   try {
-    const values = await videoService.getFilterValues();
+    // Get subject filter from query parameter
+    const subjectFilter = req.query.subject || null;
+    const values = await videoService.getFilterValues(subjectFilter);
     res.json(values);
   } catch (error) {
     console.error('Get filter values error:', error);
@@ -3115,6 +3117,231 @@ export async function generateFilteredVideosCSV(req, res) {
     console.error('[Generate Filtered CSV] Error:', error);
     res.status(500).json({ 
       error: 'Failed to generate CSV', 
+      message: error.message 
+    });
+  }
+}
+
+/**
+ * Generate HTML embed files for filtered videos
+ * Returns a ZIP file containing HTML files for each video
+ */
+export async function generateHTMLEmbeds(req, res) {
+  try {
+    const { subject, grade, unit, lesson, module, version } = req.query;
+    
+    console.log('[Generate HTML Embeds] Starting HTML embed generation with filters:', { subject, grade, unit, lesson, module, version });
+    
+    // Build filters object - same as CSV export
+    const filters = { 
+      status: 'active',
+      limit: 200,
+      page: 1
+    };
+    if (subject && subject !== 'all') {
+      filters.subject = subject;
+    }
+    if (grade && grade !== 'all') {
+      filters.grade = grade;
+    }
+    if (unit && unit !== 'all') {
+      filters.unit = unit;
+    }
+    if (lesson && lesson !== 'all') {
+      filters.lesson = lesson;
+    }
+    if (module && module !== 'all') {
+      filters.module = module;
+    }
+    if (version && version !== 'all') {
+      filters.version = version;
+    }
+    
+    // Get filtered videos - handle paginated response format
+    let allVideosResponse;
+    try {
+      allVideosResponse = await videoService.getAllVideos(filters);
+      console.log('[Generate HTML Embeds] Initial response received:', {
+        isArray: Array.isArray(allVideosResponse),
+        hasVideos: !!(allVideosResponse && allVideosResponse.videos),
+        videoCount: Array.isArray(allVideosResponse) ? allVideosResponse.length : (allVideosResponse?.videos?.length || 0),
+        totalPages: allVideosResponse?.pagination?.totalPages || 1
+      });
+    } catch (fetchError) {
+      console.error('[Generate HTML Embeds] Error fetching videos:', fetchError);
+      return res.status(500).json({ 
+        error: 'Failed to fetch videos', 
+        message: fetchError.message 
+      });
+    }
+    
+    // Extract videos array from response
+    let allVideos = [];
+    if (Array.isArray(allVideosResponse)) {
+      allVideos = allVideosResponse;
+    } else if (allVideosResponse && allVideosResponse.videos) {
+      allVideos = Array.isArray(allVideosResponse.videos) ? allVideosResponse.videos : [];
+      
+      // Fetch all pages
+      const totalPages = allVideosResponse.pagination?.totalPages || 1;
+      if (totalPages > 1) {
+        for (let page = 2; page <= totalPages; page++) {
+          try {
+            const pageFilters = { ...filters, page, limit: 200 };
+            const pageResponse = await videoService.getAllVideos(pageFilters);
+            
+            let pageVideos = [];
+            if (pageResponse && pageResponse.videos && Array.isArray(pageResponse.videos)) {
+              pageVideos = pageResponse.videos;
+            } else if (Array.isArray(pageResponse)) {
+              pageVideos = pageResponse;
+            }
+            
+            if (pageVideos.length > 0) {
+              allVideos.push(...pageVideos);
+            }
+          } catch (pageError) {
+            console.error(`[Generate HTML Embeds] Error fetching page ${page}:`, pageError.message);
+          }
+        }
+      }
+    }
+    
+    // Filter to only videos with redirect_slug
+    const videos = allVideos.filter(video => {
+      if (!video || typeof video !== 'object') {
+        return false;
+      }
+      return video.redirect_slug && String(video.redirect_slug).trim() !== '';
+    });
+    
+    if (videos.length === 0) {
+      return res.status(400).json({ error: 'No videos found matching the selected filters' });
+    }
+    
+    console.log(`[Generate HTML Embeds] Generating HTML files for ${videos.length} videos`);
+    
+    // Build frontend URL - prioritize environment variable for production
+    // Priority: 1) FRONTEND_URL env var, 2) Detect from request origin, 3) Config default
+    let frontendUrl = config.urls?.frontend || 'http://localhost:5173';
+    
+    // Check environment variable first (should be set in production)
+    if (process.env.FRONTEND_URL && process.env.FRONTEND_URL.trim()) {
+      frontendUrl = process.env.FRONTEND_URL.trim();
+      console.log(`[Generate HTML Embeds] Using FRONTEND_URL from environment: ${frontendUrl}`);
+    } else if (req) {
+      // Try to detect from request (for hosted environments)
+      // Check Origin or Referer header first
+      const origin = req.get('Origin') || req.get('Referer');
+      if (origin) {
+        try {
+          const originUrl = new URL(origin);
+          // Use the origin's protocol and host for frontend URL
+          frontendUrl = `${originUrl.protocol}//${originUrl.host}`;
+          console.log(`[Generate HTML Embeds] Detected frontend URL from request Origin/Referer: ${frontendUrl}`);
+        } catch (e) {
+          // If URL parsing fails, try to construct from headers
+          const protocol = req.get('X-Forwarded-Proto') || req.protocol || 'https';
+          const host = req.get('X-Forwarded-Host') || req.get('host') || '';
+          if (host && !host.includes('localhost')) {
+            frontendUrl = `${protocol}://${host}`;
+            console.log(`[Generate HTML Embeds] Detected frontend URL from request headers: ${frontendUrl}`);
+          }
+        }
+      }
+    }
+    
+    // Final validation: ensure we're not using localhost in production
+    if (frontendUrl.includes('localhost') && process.env.NODE_ENV === 'production') {
+      console.warn(`[Generate HTML Embeds] WARNING: Frontend URL is localhost in production!`);
+      console.warn(`[Generate HTML Embeds] Please set FRONTEND_URL environment variable.`);
+    }
+    
+    console.log(`[Generate HTML Embeds] Final frontend URL for HTML files: ${frontendUrl}`);
+    
+    // Generate HTML content for each video
+    const htmlFiles = videos.map(video => {
+      const videoTitle = video.title || video.video_id || 'Untitled Video';
+      const videoUrl = video.redirect_slug 
+        ? `${frontendUrl}/${video.redirect_slug}`
+        : `${frontendUrl}/stream/${video.video_id}`;
+      
+      // Generate filename: use title as-is, replace spaces with hyphens
+      const filename = videoTitle
+        .replace(/\s+/g, '-')
+        .replace(/[<>:"/\\|?*]/g, '') // Remove invalid filename characters
+        + '.html';
+      
+      // Generate HTML content
+      const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>${videoTitle}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background-color: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        .video-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background-color: #000;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="video-container">
+        <iframe 
+            src="${videoUrl}"
+            allow="autoplay; fullscreen; encrypted-media"
+            allowfullscreen
+            loading="eager">
+        </iframe>
+    </div>
+
+</body>
+</html>`;
+      
+      return {
+        filename,
+        content: htmlContent,
+        title: videoTitle
+      };
+    });
+    
+    // Return HTML files as JSON - frontend will create ZIP
+    // This avoids needing ZIP library on backend
+    console.log(`[Generate HTML Embeds] ✓ Generated ${htmlFiles.length} HTML files`);
+    
+    res.json({
+      success: true,
+      files: htmlFiles,
+      count: htmlFiles.length,
+      message: `Generated ${htmlFiles.length} HTML embed files`
+    });
+    
+  } catch (error) {
+    console.error('[Generate HTML Embeds] Error:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate HTML embed files', 
       message: error.message 
     });
   }

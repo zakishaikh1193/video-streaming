@@ -112,6 +112,21 @@ function Sidebar() {
             CSV Export
           </Link>
 
+          {/* 6.5. HTML Embed Export */}
+          <Link
+            to="/admin/html-embed-export"
+            className={`flex items-center px-4 py-3 rounded-lg transition-colors ${
+              location.pathname === '/admin/html-embed-export' 
+                ? 'bg-purple-100 text-purple-800 shadow-sm' 
+                : 'text-gray-700 hover:bg-purple-50 hover:text-purple-700'
+            }`}
+          >
+            <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+            HTML Embed Export
+          </Link>
+
           {/* 7. Redirect */}
           <Link
             to="/admin/redirects"

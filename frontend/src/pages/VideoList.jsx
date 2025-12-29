@@ -310,6 +310,11 @@ function VideoList() {
     fetchVideos();
   }, []);
 
+  // Reload filter options when subject changes (including when reset to empty)
+  useEffect(() => {
+    fetchFilterOptions(filters.subject || '');
+  }, [filters.subject]);
+
   // Refresh videos when navigating back from edit page (location key changes)
   useEffect(() => {
     // Refresh videos when location changes (e.g., coming back from edit page)
@@ -362,9 +367,16 @@ function VideoList() {
     filters.status
   ]);
 
-  const fetchFilterOptions = async () => {
+  const fetchFilterOptions = async (subject = null) => {
     try {
-      const response = await api.get('/videos/filters');
+      // Pass subject filter to get filtered options
+      // Use provided subject parameter or current state
+      const currentSubject = subject !== null ? subject : (filters.subject || '');
+      const params = {};
+      if (currentSubject && currentSubject.trim()) {
+        params.subject = currentSubject.trim();
+      }
+      const response = await api.get('/videos/filters', { params });
       setFilterOptions(response.data);
     } catch (error) {
       console.error('Failed to fetch filter options:', error);
@@ -714,7 +726,19 @@ function VideoList() {
               value={filters.subject || filters.course || ''}
               onChange={(e) => {
                 const value = e.target.value;
-                setFilters(prev => ({ ...prev, subject: value, course: value }));
+                setFilters(prev => {
+                  const newFilters = { ...prev, subject: value, course: value };
+                  // Reset dependent filters when subject changes
+                  if (value === '' || prev.subject !== value) {
+                    newFilters.grade = '';
+                    newFilters.unit = '';
+                    newFilters.lesson = '';
+                    newFilters.module = '';
+                    newFilters.moduleNumber = '';
+                    newFilters.version = '';
+                  }
+                  return newFilters;
+                });
               }}
               className="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none bg-white cursor-pointer"
             >

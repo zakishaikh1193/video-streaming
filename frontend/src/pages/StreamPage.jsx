@@ -4,7 +4,7 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
 
-const VideoPlayer = lazy(() => import('../components/VideoPlayer'));
+const SimpleVideoPlayer = lazy(() => import('../components/SimpleVideoPlayer'));
 
 function StreamPage() {
   const { videoId } = useParams();
@@ -165,9 +165,9 @@ function StreamPage() {
                     </div>
                   </div>
                 }>
-                  <VideoPlayer 
+                  <SimpleVideoPlayer 
                     src={streamingUrl} 
-                    captions={video.captions || []} 
+                    captions={Array.isArray(video.captions) ? video.captions : []} 
                     autoplay={true}
                     videoId={video.video_id || videoId}
                   />

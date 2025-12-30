@@ -12,7 +12,15 @@
     "generate-short-links": "node scripts/generateShortLinksForAllVideos.js",
     "migrate-cloudflare": "node scripts/runCloudflareMigration.js",
     "migrate-csv-history": "node scripts/runCsvHistoryMigration.js",
-    "migrate-video-replacements": "node scripts/runVideoReplacementsMigration.js"
+    "migrate-video-replacements": "node scripts/runVideoReplacementsMigration.js",
+    "generate-subtitles": "node scripts/generateSubtitles.js",
+    "generate-all-subtitles": "node scripts/generateSubtitlesForAllVideos.js",
+    "check-subtitle-deps": "node scripts/checkSubtitleDependencies.js",
+    "check-subtitles": "node scripts/checkSubtitleSystem.js",
+    "check-videos": "node scripts/checkVideoIds.js",
+    "import-subtitles": "node scripts/importSubtitlesToCaptions.js",
+    "sync-subtitles": "node scripts/syncSubtitlesToCaptions.js",
+    "kill-port": "node scripts/killPort.js"
   },
   "keywords": [],
   "author": "",

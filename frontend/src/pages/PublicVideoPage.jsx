@@ -6,7 +6,7 @@ import QRCodeViewer from '../components/QRCodeViewer';
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
 
-const VideoPlayer = lazy(() => import('../components/VideoPlayer'));
+const SimpleVideoPlayer = lazy(() => import('../components/SimpleVideoPlayer'));
 
 function PublicVideoPage() {
   const { videoId } = useParams();
@@ -51,6 +51,32 @@ function PublicVideoPage() {
           console.log('[PublicVideoPage] Module field has value:', videoData.module);
         }
         
+        // Ensure captions array exists (even if empty)
+        if (!Array.isArray(videoData.captions)) {
+          videoData.captions = [];
+        }
+        
+        // Fetch captions if not already included or if array is empty
+        if ((!videoData.captions || videoData.captions.length === 0) && videoData.video_id) {
+          try {
+            console.log(`[PublicVideoPage] 🔍 Fetching captions for video_id: ${videoData.video_id}`);
+            const captionsResponse = await api.get(`/captions/${videoData.video_id}`);
+            if (captionsResponse.data && Array.isArray(captionsResponse.data)) {
+              videoData.captions = captionsResponse.data;
+              console.log(`[PublicVideoPage] ✅ Loaded ${captionsResponse.data.length} caption(s) for video ${videoData.video_id}`);
+            } else {
+              console.log(`[PublicVideoPage] ⚠️ Captions response is not an array:`, captionsResponse.data);
+              videoData.captions = [];
+            }
+          } catch (captionErr) {
+            console.warn('[PublicVideoPage] ⚠️ Could not fetch captions:', captionErr);
+            videoData.captions = [];
+          }
+        } else {
+          console.log(`[PublicVideoPage] ✅ Video already has ${videoData.captions.length} caption(s)`);
+        }
+        
+        console.log(`[PublicVideoPage] 📤 Setting video state with ${videoData.captions.length} caption(s)`);
         setVideo(videoData);
       } catch (err) {
         setError(err.response?.data?.error || 'Failed to load video');
@@ -286,9 +312,9 @@ function PublicVideoPage() {
                 </div>
               </div>
             }>
-              <VideoPlayer 
+              <SimpleVideoPlayer 
                 src={streamUrl} 
-                captions={video.captions || []} 
+                captions={Array.isArray(video.captions) ? video.captions : []} 
                 videoId={video.video_id || videoId}
               />
             </Suspense>

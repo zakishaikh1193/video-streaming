@@ -6,6 +6,7 @@ import '../utils/videojs-plugins';
 import { AlertCircle, Pause } from 'lucide-react';
 import VideoDiagnostic from './VideoDiagnostic';
 import api from '../services/api';
+import { getBackendBaseUrl } from '../utils/apiConfig';
 
 const VIEW_KEY = 'video_viewed_ids';
 
@@ -152,7 +153,12 @@ const videoPlayerStyles = `
   }
   /* Closed Captions button - right side */
   .video-js .vjs-subs-caps-button {
-    order: 3;
+    order: 6;
+    margin-left: 8px;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    cursor: pointer !important;
   }
   /* Fullscreen button - right side */
   .video-js .vjs-fullscreen-control {
@@ -589,6 +595,7 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
           'liveDisplay',
           'remainingTimeDisplay',
           'spacer', // Flexible spacer to push controls to right
+          'subsCapsButton', // Closed Captions/Subtitles button
           'fullscreenToggle' // Fullscreen
           // Removed: 'currentTimeDisplay', 'timeDivider', 'durationDisplay' (Time display)
           // Removed: 'playbackRateMenuButton' (now in settings menu)
@@ -694,10 +701,18 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
       // Ensure all control buttons are visible and properly styled
       const controlBar = player.controlBar;
       if (controlBar) {
-        // Remove captions button completely (not in controlBar children anymore)
+        // Show captions button if captions are available
         const captionsBtn = controlBar.getChild('subsCapsButton');
         if (captionsBtn) {
-          captionsBtn.hide();
+          if (captions && captions.length > 0) {
+            captionsBtn.show();
+            console.log(`[VideoPlayer] Showing CC button - ${captions.length} caption(s) available`);
+          } else {
+            captionsBtn.hide();
+            console.log('[VideoPlayer] Hiding CC button - no captions available');
+          }
+        } else {
+          console.warn('[VideoPlayer] CC button not found in control bar');
         }
 
         // Hide Picture-in-Picture button (removed)
@@ -872,8 +887,123 @@ function VideoPlayer({ src, captions = [], autoplay = false, poster = null, vide
     // Quality levels are now handled in the settings menu
     // No need to create separate quality selector button
     
-    // Ensure settings menu button is visible and hide direct buttons
-    // Remove captions handling entirely (no CC button, no tracks)
+    // Load captions/subtitles if available
+    const loadCaptions = () => {
+      console.log('[VideoPlayer] loadCaptions called, captions:', captions);
+      
+      if (captions && captions.length > 0) {
+        const backendUrl = getBackendBaseUrl();
+        
+        console.log(`[VideoPlayer] Loading ${captions.length} caption track(s)...`);
+        console.log(`[VideoPlayer] Backend URL: ${backendUrl}`);
+        
+        // Clear existing text tracks first
+        const existingTracks = player.textTracks();
+        for (let i = existingTracks.length - 1; i >= 0; i--) {
+          const track = existingTracks[i];
+          if (track.kind === 'captions' || track.kind === 'subtitles') {
+            player.removeRemoteTextTrack(track);
+          }
+        }
+        
+        captions.forEach((caption, index) => {
+          if (caption.file_path) {
+            // Construct full URL for caption file
+            let captionUrl = caption.file_path;
+            
+            console.log(`[VideoPlayer] Processing caption ${index + 1}:`, {
+              file_path: caption.file_path,
+              language: caption.language,
+              originalUrl: captionUrl
+            });
+            
+            // If it's a relative path, make it absolute
+            if (!captionUrl.startsWith('http://') && !captionUrl.startsWith('https://')) {
+              // Remove leading slash if present
+              if (captionUrl.startsWith('/')) {
+                captionUrl = captionUrl.substring(1);
+              }
+              // Captions are stored in video-storage/captions/, so prepend video-storage/
+              // file_path format: "captions/videoId_language.vtt"
+              captionUrl = `${backendUrl}/video-storage/${captionUrl}`;
+            }
+            
+            console.log(`[VideoPlayer] Final caption URL: ${captionUrl}`);
+            
+            // Add text track to player
+            try {
+              const textTrack = player.addRemoteTextTrack({
+                kind: 'captions',
+                src: captionUrl,
+                srclang: caption.language || 'en',
+                label: caption.language ? `${caption.language.toUpperCase()}` : 'English',
+                default: caption.language === 'en' || index === 0
+              }, false); // false = don't add to DOM immediately
+              
+              console.log(`[VideoPlayer] ✓ Added caption track: ${caption.language} from ${captionUrl}`);
+            } catch (error) {
+              console.error(`[VideoPlayer] ✗ Failed to add caption track:`, error);
+            }
+          } else {
+            console.warn(`[VideoPlayer] Caption ${index + 1} has no file_path:`, caption);
+          }
+        });
+        
+        // Enable the first caption track by default if available
+        setTimeout(() => {
+          const textTracks = player.textTracks();
+          console.log(`[VideoPlayer] Text tracks available: ${textTracks.length}`);
+          
+          if (textTracks && textTracks.length > 0) {
+            Array.from(textTracks).forEach((track, idx) => {
+              console.log(`[VideoPlayer] Track ${idx + 1}:`, {
+                kind: track.kind,
+                language: track.language,
+                label: track.label,
+                mode: track.mode,
+                default: track.default,
+                src: track.src || 'N/A'
+              });
+            });
+            
+            const defaultTrack = Array.from(textTracks).find(track => track.default) || textTracks[0];
+            if (defaultTrack) {
+              defaultTrack.mode = 'showing';
+              console.log(`[VideoPlayer] ✓ Enabled default caption track: ${defaultTrack.language}`);
+            }
+          } else {
+            console.warn('[VideoPlayer] No text tracks found after loading captions');
+          }
+        }, 1500);
+      } else {
+        console.log('[VideoPlayer] No captions available for this video');
+      }
+    };
+    
+    // Load captions when player is ready and after source is set
+    const readyHandler = () => {
+      console.log('[VideoPlayer] Player ready, loading captions...');
+      // Wait a bit for the video source to be set
+      setTimeout(() => {
+        loadCaptions();
+      }, 500);
+    };
+    
+    player.ready(readyHandler);
+    
+    // Also load captions when video metadata is loaded (in case ready fires too early)
+    player.on('loadedmetadata', () => {
+      console.log('[VideoPlayer] Metadata loaded, loading captions...');
+      loadCaptions();
+    });
+    
+    // Reload captions if captions prop changes
+    if (playerRef.current && captions) {
+      console.log('[VideoPlayer] Captions prop changed, reloading...');
+      setTimeout(() => {
+        loadCaptions();
+      }, 1000);
+    }
 
     player.on('loadstart', () => {
       console.log('Video: Load started');

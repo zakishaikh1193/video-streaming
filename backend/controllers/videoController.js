@@ -503,6 +503,30 @@ export async function getVideo(req, res) {
       return res.status(404).json({ error: 'Video not found' });
     }
     
+    // Fetch captions for this video
+    let captions = [];
+    try {
+      const captionService = await import('../services/captionService.js');
+      const videoIdForCaptions = video.video_id || videoId;
+      console.log(`[Get Video] 🔍 Fetching captions for video_id: ${videoIdForCaptions}`);
+      captions = await captionService.getCaptionsByVideoId(videoIdForCaptions);
+      console.log(`[Get Video] ✅ Found ${captions.length} caption(s) for video ${videoIdForCaptions}`);
+      if (captions.length > 0) {
+        captions.forEach((cap, idx) => {
+          console.log(`[Get Video]   Caption ${idx + 1}:`, {
+            id: cap.id,
+            video_id: cap.video_id,
+            language: cap.language,
+            file_path: cap.file_path
+          });
+        });
+      }
+    } catch (captionError) {
+      console.warn('[Get Video] ⚠️ Could not fetch captions:', captionError.message);
+      console.error('[Get Video] Caption error details:', captionError);
+      captions = [];
+    }
+    
     // Ensure all fields are properly returned, including module
     // Log to verify module is in the response
     console.log(`[Get Video] Video ID: ${videoId}`);
@@ -519,11 +543,13 @@ export async function getVideo(req, res) {
       module: video.hasOwnProperty('module') ? video.module : null,
       activity: video.hasOwnProperty('activity') ? video.activity : null,
       subject: video.hasOwnProperty('subject') ? video.subject : null,
+      captions: captions, // Include captions in response
       course: video.hasOwnProperty('subject') ? video.subject : null, // Backward compatibility
       grade: video.hasOwnProperty('grade') ? video.grade : null,
       lesson: video.hasOwnProperty('lesson') ? video.lesson : null
     };
     
+    console.log(`[Get Video] 📤 Sending response with ${captions.length} caption(s)`);
     console.log(`[Get Video] Response module field:`, response.module);
     res.json(response);
   } catch (error) {
@@ -854,6 +880,44 @@ export async function uploadVideo(req, res) {
     }
     
     console.log(`[Upload Video] ✓ Video record created: ID ${insertId.value}`);
+    
+    // Automatically generate subtitles for the uploaded video (async, non-blocking)
+    console.log(`[Upload Video] 🎤 Starting automatic subtitle generation...`);
+    (async () => {
+      try {
+        const { generateSubtitles } = await import('../utils/subtitleGenerator.js');
+        const { ensureDirectoryExists } = await import('../utils/fileUtils.js');
+        const fs = await import('fs/promises');
+        const captionService = await import('../services/captionService.js');
+        
+        const videoNameWithoutExt = path.basename(fileName, path.extname(fileName));
+        
+        // Generate subtitle to temp location first
+        const subtitlesDir = path.join(path.dirname(__dirname), '../../subtitles');
+        await ensureDirectoryExists(subtitlesDir);
+        const tempSubtitlePath = path.join(subtitlesDir, `${videoNameWithoutExt}.vtt`);
+        
+        // Generate subtitles
+        await generateSubtitles(filePath, {
+          outputPath: tempSubtitlePath,
+          model: 'base',
+          language: null // Auto-detect
+        });
+        
+        console.log(`[Upload Video] ✅ Subtitles generated: ${tempSubtitlePath}`);
+        
+        // Read subtitle file and save to caption system (video-storage/captions/)
+        try {
+          const subtitleBuffer = await fs.readFile(tempSubtitlePath);
+          await captionService.uploadCaption(videoId, 'en', subtitleBuffer, `${videoNameWithoutExt}.vtt`);
+          console.log(`[Upload Video] ✅ Caption saved to video-storage/captions/ and added to database`);
+        } catch (captionError) {
+          console.warn(`[Upload Video] Could not add caption to database:`, captionError.message);
+        }
+      } catch (subtitleError) {
+        console.warn(`[Upload Video] ⚠️ Subtitle generation failed (non-critical):`, subtitleError.message);
+      }
+    })();
     
     // Fetch the created video to get all fields
     const video = await videoService.getVideoById(insertId.value);

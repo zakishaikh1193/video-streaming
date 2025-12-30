@@ -882,7 +882,7 @@ export async function uploadVideo(req, res) {
     console.log(`[Upload Video] ✓ Video record created: ID ${insertId.value}`);
     
     // Automatically generate subtitles for the uploaded video (async, non-blocking)
-    console.log(`[Upload Video] 🎤 Starting automatic subtitle generation...`);
+    console.log(`[Upload Video] 🎤 Starting automatic subtitle generation for ${videoId}...`);
     (async () => {
       try {
         const { generateSubtitles } = await import('../utils/subtitleGenerator.js');
@@ -897,6 +897,9 @@ export async function uploadVideo(req, res) {
         await ensureDirectoryExists(subtitlesDir);
         const tempSubtitlePath = path.join(subtitlesDir, `${videoNameWithoutExt}.vtt`);
         
+        console.log(`[Upload Video] 🎤 Generating subtitles for: ${filePath}`);
+        console.log(`[Upload Video] 📝 Output path: ${tempSubtitlePath}`);
+        
         // Generate subtitles
         await generateSubtitles(filePath, {
           outputPath: tempSubtitlePath,
@@ -910,12 +913,16 @@ export async function uploadVideo(req, res) {
         try {
           const subtitleBuffer = await fs.readFile(tempSubtitlePath);
           await captionService.uploadCaption(videoId, 'en', subtitleBuffer, `${videoNameWithoutExt}.vtt`);
-          console.log(`[Upload Video] ✅ Caption saved to video-storage/captions/ and added to database`);
+          console.log(`[Upload Video] ✅ Caption saved to video-storage/captions/ and added to database for video ${videoId}`);
         } catch (captionError) {
-          console.warn(`[Upload Video] Could not add caption to database:`, captionError.message);
+          console.error(`[Upload Video] ❌ Could not add caption to database:`, captionError.message);
+          console.error(`[Upload Video] Caption error stack:`, captionError.stack);
         }
       } catch (subtitleError) {
-        console.warn(`[Upload Video] ⚠️ Subtitle generation failed (non-critical):`, subtitleError.message);
+        console.error(`[Upload Video] ❌ Subtitle generation failed (non-critical):`, subtitleError.message);
+        console.error(`[Upload Video] Subtitle error stack:`, subtitleError.stack);
+        console.error(`[Upload Video] ⚠️ Video uploaded successfully, but subtitles will need to be generated manually.`);
+        console.error(`[Upload Video] 💡 Run: npm run generate-and-import-all`);
       }
     })();
     

@@ -1144,20 +1144,32 @@ export async function uploadToMyStorage(req, res) {
     }
     
     // Automatically generate subtitles for the uploaded video (async, non-blocking)
-    console.log(`[Cloudflare Upload] 🎤 Starting automatic subtitle generation...`);
+    console.log(`[Cloudflare Upload] 🎤 Starting automatic subtitle generation for video ${videoId}...`);
     (async () => {
       try {
+        // Verify targetFilePath exists
+        if (!targetFilePath || !fsSync.existsSync(targetFilePath)) {
+          console.error(`[Cloudflare Upload] ❌ Video file not found: ${targetFilePath}`);
+          console.error(`[Cloudflare Upload] ⚠️ Cannot generate subtitles - file path is invalid`);
+          return;
+        }
+        
         const { generateSubtitles } = await import('../utils/subtitleGenerator.js');
         const { ensureDirectoryExists } = await import('../utils/fileUtils.js');
         const fs = await import('fs/promises');
         const captionService = await import('../services/captionService.js');
         
-        const videoNameWithoutExt = path.basename(fileName, path.extname(fileName));
+        // Use videoId for subtitle filename (not fileName) to ensure consistency
+        const subtitleFileName = `${videoId}.vtt`;
         
         // Generate subtitle to temp location first
         const subtitlesDir = path.join(path.dirname(__dirname), '../../subtitles');
         await ensureDirectoryExists(subtitlesDir);
-        const tempSubtitlePath = path.join(subtitlesDir, `${videoNameWithoutExt}.vtt`);
+        const tempSubtitlePath = path.join(subtitlesDir, subtitleFileName);
+        
+        console.log(`[Cloudflare Upload] 🎤 Generating subtitles for video: ${videoId}`);
+        console.log(`[Cloudflare Upload] 📹 Video file: ${targetFilePath}`);
+        console.log(`[Cloudflare Upload] 📝 Subtitle output: ${tempSubtitlePath}`);
         
         // Generate subtitles
         await generateSubtitles(targetFilePath, {
@@ -1171,13 +1183,17 @@ export async function uploadToMyStorage(req, res) {
         // Read subtitle file and save to caption system (video-storage/captions/)
         try {
           const subtitleBuffer = await fs.readFile(tempSubtitlePath);
-          await captionService.uploadCaption(videoId, 'en', subtitleBuffer, `${videoNameWithoutExt}.vtt`);
-          console.log(`[Cloudflare Upload] ✅ Caption saved to video-storage/captions/ and added to database`);
+          await captionService.uploadCaption(videoId, 'en', subtitleBuffer, subtitleFileName);
+          console.log(`[Cloudflare Upload] ✅ Caption saved to video-storage/captions/ and added to database for video ${videoId}`);
         } catch (captionError) {
-          console.warn(`[Cloudflare Upload] Could not add caption to database:`, captionError.message);
+          console.error(`[Cloudflare Upload] ❌ Could not add caption to database:`, captionError.message);
+          console.error(`[Cloudflare Upload] Caption error stack:`, captionError.stack);
         }
       } catch (subtitleError) {
-        console.warn(`[Cloudflare Upload] ⚠️ Subtitle generation failed (non-critical):`, subtitleError.message);
+        console.error(`[Cloudflare Upload] ❌ Subtitle generation failed (non-critical):`, subtitleError.message);
+        console.error(`[Cloudflare Upload] Subtitle error stack:`, subtitleError.stack);
+        console.error(`[Cloudflare Upload] ⚠️ Video uploaded successfully, but subtitles will need to be generated manually.`);
+        console.error(`[Cloudflare Upload] 💡 Run: npm run generate-and-import-all`);
       }
     })();
     

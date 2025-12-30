@@ -1375,7 +1375,7 @@ export async function restoreVideo(id) {
 
 /**
  * Permanently delete video (hard delete: remove from database)
- * This removes the video record, redirects, and related data permanently
+ * This removes the video record, redirects, captions, and related data permanently
  */
 export async function permanentDeleteVideo(id) {
   // Fetch video first to verify it exists and is deleted
@@ -1385,8 +1385,18 @@ export async function permanentDeleteVideo(id) {
   }
 
   // Hard delete: Remove video record permanently
-  // Also delete related redirects
+  // Also delete related redirects and captions
   try {
+    // Delete captions/subtitles for this video
+    try {
+      const captionService = await import('./captionService.js');
+      const captionResult = await captionService.deleteCaptionsByVideoId(video.video_id);
+      console.log(`[permanentDeleteVideo] Deleted ${captionResult.deleted} caption(s) and ${captionResult.filesDeleted} file(s) for video ${video.video_id}`);
+    } catch (captionError) {
+      console.warn(`[permanentDeleteVideo] Could not delete captions for video ${video.video_id}:`, captionError.message);
+      // Continue with video deletion even if caption deletion fails
+    }
+    
     // Delete redirects associated with this video
     if (video.redirect_slug) {
       await pool.execute('DELETE FROM redirects WHERE slug = ?', [video.redirect_slug]);

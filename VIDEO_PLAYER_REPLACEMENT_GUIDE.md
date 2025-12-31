@@ -175,3 +175,4 @@ Now when you upload videos via Cloudflare or regular upload:
 2. Subtitles are **automatically generated**
 3. Subtitles are **automatically shown** in the video player
 4. CC button appears and works perfectly!
+

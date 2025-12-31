@@ -275,3 +275,4 @@ main().catch(async (error) => {
   await pool.end();
   process.exit(1);
 });
+

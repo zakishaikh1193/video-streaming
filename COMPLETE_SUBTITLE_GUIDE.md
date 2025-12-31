@@ -614,3 +614,4 @@ npm run generate-and-import-all
 5. Click CC → Subtitles overlay on video
 
 **That's it!** 🎉
+

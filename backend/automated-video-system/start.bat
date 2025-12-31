@@ -39,3 +39,4 @@ echo 💡 Press Ctrl+C to stop
 echo.
 
 call npm start
+

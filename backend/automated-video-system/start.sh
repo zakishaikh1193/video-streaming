@@ -36,3 +36,4 @@ echo "💡 Press Ctrl+C to stop"
 echo ""
 
 npm start
+

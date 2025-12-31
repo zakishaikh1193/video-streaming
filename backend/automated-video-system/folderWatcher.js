@@ -163,3 +163,4 @@ process.on('SIGTERM', () => {
 
 // Start the watcher
 startWatcher();
+

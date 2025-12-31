@@ -1,0 +1,260 @@
+#!/usr/bin/env node
+
+/**
+ * Sync Subtitles from Upload Folder to Caption System
+ * 
+ * This script:
+ * 1. Scans backend/upload/ for .vtt files (subtitles generated alongside videos)
+ * 2. Also checks backend/subtitles/ for .vtt files
+ * 3. Moves them to video-storage/captions/ with correct naming
+ * 4. Adds entries to the captions database table
+ * 
+ * Usage:
+ *   node scripts/syncSubtitlesToCaptions.js [options]
+ * 
+ * Options:
+ *   --language, -l  Language code (default: en)
+ *   --dry-run       Show what would be done without making changes
+ */
+
+import { existsSync, readdirSync } from 'fs';
+import { copyFile } from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import pool from '../config/database.js';
+import { ensureDirectoryExists } from '../utils/fileUtils.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Paths
+const UPLOAD_DIR = path.join(__dirname, '../upload');
+const SUBTITLES_DIR = path.join(__dirname, '../subtitles');
+const CAPTIONS_DIR = path.join(__dirname, '../../video-storage/captions');
+
+// Parse command line arguments
+const args = process.argv.slice(2);
+let language = 'en';
+let dryRun = false;
+
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+  if (arg === '--language' || arg === '-l') {
+    language = args[++i] || 'en';
+  } else if (arg === '--dry-run') {
+    dryRun = true;
+  }
+}
+
+/**
+ * Get all .vtt files from a directory
+ */
+function getVttFiles(dir) {
+  if (!existsSync(dir)) {
+    return [];
+  }
+
+  const files = readdirSync(dir);
+  return files
+    .filter(file => file.toLowerCase().endsWith('.vtt'))
+    .map(file => ({
+      filename: file,
+      fullPath: path.join(dir, file),
+      videoId: path.basename(file, '.vtt')
+    }));
+}
+
+/**
+ * Check if video exists in database
+ */
+async function videoExists(videoId) {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT video_id FROM videos WHERE video_id = ?',
+      [videoId]
+    );
+    return rows.length > 0;
+  } catch (error) {
+    console.error(`Error checking video ${videoId}:`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Check if caption already exists in database
+ */
+async function captionExists(videoId, lang) {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT id FROM captions WHERE video_id = ? AND language = ?',
+      [videoId, lang]
+    );
+    return rows.length > 0;
+  } catch (error) {
+    console.error(`Error checking caption ${videoId}/${lang}:`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Import a single subtitle file
+ */
+async function importSubtitle(subtitle, lang) {
+  const { videoId, fullPath, filename } = subtitle;
+  
+  // Check if video exists
+  const exists = await videoExists(videoId);
+  if (!exists) {
+    console.warn(`   ⚠️  Video ${videoId} not found in database, skipping...`);
+    return { success: false, videoId, reason: 'Video not in database' };
+  }
+
+  // Check if caption already exists
+  const captionExistsInDb = await captionExists(videoId, lang);
+  if (captionExistsInDb) {
+    console.log(`   ⏭️  Caption already exists for ${videoId} (${lang}), skipping...`);
+    return { success: false, videoId, reason: 'Caption already exists' };
+  }
+
+  // Target paths
+  const targetFilename = `${videoId}_${lang}.vtt`;
+  const targetPath = path.join(CAPTIONS_DIR, targetFilename);
+  const relativePath = `captions/${targetFilename}`;
+
+  if (dryRun) {
+    console.log(`   [DRY RUN] Would import: ${filename}`);
+    console.log(`            → ${targetPath}`);
+    console.log(`            → Database: video_id=${videoId}, language=${lang}, file_path=${relativePath}`);
+    return { success: true, videoId, dryRun: true };
+  }
+
+  try {
+    // Ensure captions directory exists
+    await ensureDirectoryExists(CAPTIONS_DIR);
+
+    // Copy file to captions directory
+    await copyFile(fullPath, targetPath);
+    console.log(`   ✅ Copied: ${filename} → ${targetPath}`);
+
+    // Add to database
+    const query = `
+      INSERT INTO captions (video_id, language, file_path)
+      VALUES (?, ?, ?)
+    `;
+    await pool.execute(query, [videoId, lang, relativePath]);
+    console.log(`   ✅ Added to database: ${videoId} (${lang})`);
+
+    return { success: true, videoId, targetPath, relativePath };
+  } catch (error) {
+    console.error(`   ❌ Error importing ${filename}:`, error.message);
+    return { success: false, videoId, error: error.message };
+  }
+}
+
+/**
+ * Main function
+ */
+async function main() {
+  console.log('🚀 Syncing subtitle files to caption system...\n');
+  console.log('='.repeat(60));
+  console.log('Configuration:');
+  console.log(`   Upload folder: ${UPLOAD_DIR}`);
+  console.log(`   Subtitles folder: ${SUBTITLES_DIR}`);
+  console.log(`   Captions folder: ${CAPTIONS_DIR}`);
+  console.log(`   Language: ${language}`);
+  console.log(`   Mode: ${dryRun ? 'DRY RUN (no changes)' : 'LIVE (will make changes)'}`);
+  console.log('='.repeat(60));
+
+  // Get subtitle files from both locations
+  console.log('\n📂 Scanning for subtitle files...');
+  const uploadVttFiles = getVttFiles(UPLOAD_DIR);
+  const subtitlesVttFiles = getVttFiles(SUBTITLES_DIR);
+  
+  const allVttFiles = [...uploadVttFiles, ...subtitlesVttFiles];
+  
+  // Remove duplicates (same videoId)
+  const uniqueFiles = [];
+  const seenIds = new Set();
+  for (const file of allVttFiles) {
+    if (!seenIds.has(file.videoId)) {
+      seenIds.add(file.videoId);
+      uniqueFiles.push(file);
+    }
+  }
+
+  if (uploadVttFiles.length > 0) {
+    console.log(`   Found ${uploadVttFiles.length} .vtt file(s) in upload folder`);
+  }
+  if (subtitlesVttFiles.length > 0) {
+    console.log(`   Found ${subtitlesVttFiles.length} .vtt file(s) in subtitles folder`);
+  }
+
+  if (uniqueFiles.length === 0) {
+    console.log('   ⚠️  No .vtt files found in either location');
+    console.log('\n💡 Tip: Run "npm run generate-all-subtitles" to generate subtitles first');
+    await pool.end();
+    process.exit(0);
+  }
+
+  console.log(`   ✅ Found ${uniqueFiles.length} unique subtitle file(s)\n`);
+
+  // Process each subtitle file
+  const results = [];
+  let successCount = 0;
+  let failCount = 0;
+  let skipCount = 0;
+
+  for (let i = 0; i < uniqueFiles.length; i++) {
+    const subtitle = uniqueFiles[i];
+    console.log(`\n[${i + 1}/${uniqueFiles.length}] Processing: ${subtitle.filename}`);
+    
+    const result = await importSubtitle(subtitle, language);
+    results.push(result);
+    
+    if (result.success && !result.dryRun) {
+      successCount++;
+    } else if (result.reason === 'Caption already exists' || result.reason === 'Video not in database') {
+      skipCount++;
+    } else {
+      failCount++;
+    }
+  }
+
+  // Summary
+  console.log('\n' + '='.repeat(60));
+  console.log('📊 Summary:');
+  console.log(`   Total files: ${uniqueFiles.length}`);
+  console.log(`   ✅ Imported: ${successCount}`);
+  console.log(`   ⏭️  Skipped: ${skipCount}`);
+  console.log(`   ❌ Failed: ${failCount}`);
+  console.log('='.repeat(60));
+
+  if (failCount > 0) {
+    console.log('\n❌ Failed imports:');
+    results
+      .filter(r => !r.success && r.error)
+      .forEach(r => {
+        console.log(`   - ${r.videoId}: ${r.error}`);
+      });
+  }
+
+  if (successCount > 0 || dryRun) {
+    console.log('\n✨ Sync completed!');
+    if (!dryRun) {
+      console.log(`   Captions saved to: ${CAPTIONS_DIR}`);
+      console.log(`   Database entries created in 'captions' table`);
+    }
+  }
+
+  // Close database connection
+  await pool.end();
+
+  process.exit(failCount > 0 ? 1 : 0);
+}
+
+// Run main function
+main().catch(error => {
+  console.error('\n❌ Fatal error:', error);
+  process.exit(1);
+});
+

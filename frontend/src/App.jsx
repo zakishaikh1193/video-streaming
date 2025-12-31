@@ -19,9 +19,9 @@ const BulkUpload = lazy(() => import('./pages/BulkUpload'));
 const QRCodeStorage = lazy(() => import('./pages/QRCodeStorage'));
 const VideosTrash = lazy(() => import('./pages/VideosTrash'));
 const CSVExport = lazy(() => import('./pages/CSVExport'));
+const HTMLEmbedExport = lazy(() => import('./pages/HTMLEmbedExport'));
 const MyStorageManager = lazy(() => import('./pages/CloudflareResourceManager'));
 const ShortUrlRedirect = lazy(() => import('./pages/ShortUrlRedirect'));
-const SelectChild = lazy(() => import('./pages/SelectChild'));
 
 function App() {
   return (
@@ -34,7 +34,6 @@ function App() {
           <Route path="diagnostic" element={<StreamDiagnostic />} />
           <Route path="diagnostic/:videoId" element={<StreamDiagnostic />} />
           <Route path="admin/login" element={<AdminLogin />} />
-          <Route path="select-child" element={<SelectChild />} />
 
           <Route path="admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="admin/bulk-upload" element={<ProtectedRoute><BulkUpload /></ProtectedRoute>} />
@@ -44,6 +43,7 @@ function App() {
           <Route path="admin/qr-codes" element={<ProtectedRoute><QRCodeStorage /></ProtectedRoute>} />
           <Route path="admin/trash" element={<ProtectedRoute><VideosTrash /></ProtectedRoute>} />
           <Route path="admin/csv-export" element={<ProtectedRoute><CSVExport /></ProtectedRoute>} />
+          <Route path="admin/html-embed-export" element={<ProtectedRoute><HTMLEmbedExport /></ProtectedRoute>} />
           <Route path="admin/cloudflare" element={<ProtectedRoute><MyStorageManager /></ProtectedRoute>} />
           <Route path="admin/redirects" element={<ProtectedRoute><RedirectViewer /></ProtectedRoute>} />
           <Route path="admin/users" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />

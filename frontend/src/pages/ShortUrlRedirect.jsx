@@ -4,7 +4,7 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 import api from '../services/api';
 import { getBackendBaseUrl } from '../utils/apiConfig';
 
-const VideoPlayer = lazy(() => import('../components/VideoPlayer'));
+const SimpleVideoPlayer = lazy(() => import('../components/SimpleVideoPlayer'));
 
 function ShortUrlRedirect() {
   const { slug } = useParams();
@@ -158,6 +158,38 @@ function ShortUrlRedirect() {
           return;
         }
 
+        // Ensure captions array exists (even if empty)
+        if (!Array.isArray(videoData.captions)) {
+          videoData.captions = [];
+        }
+        
+        // Fetch captions if not already included or if array is empty
+        if ((!videoData.captions || videoData.captions.length === 0) && videoData.video_id) {
+          try {
+            console.log(`[ShortUrlRedirect] 🔍 Fetching captions for video_id: ${videoData.video_id}`);
+            const captionsResponse = await api.get(`/captions/${videoData.video_id}`);
+            if (captionsResponse.data && Array.isArray(captionsResponse.data)) {
+              videoData.captions = captionsResponse.data;
+              console.log(`[ShortUrlRedirect] ✅ Loaded ${captionsResponse.data.length} caption(s) for video ${videoData.video_id}`);
+              captionsResponse.data.forEach((cap, idx) => {
+                console.log(`[ShortUrlRedirect]   Caption ${idx + 1}:`, {
+                  language: cap.language,
+                  file_path: cap.file_path
+                });
+              });
+            } else {
+              console.log(`[ShortUrlRedirect] ⚠️ Captions response is not an array:`, captionsResponse.data);
+              videoData.captions = [];
+            }
+          } catch (captionErr) {
+            console.warn('[ShortUrlRedirect] ⚠️ Could not fetch captions:', captionErr);
+            videoData.captions = [];
+          }
+        } else {
+          console.log(`[ShortUrlRedirect] ✅ Video already has ${videoData.captions.length} caption(s)`);
+        }
+
+        console.log(`[ShortUrlRedirect] 📤 Setting video state with ${videoData.captions.length} caption(s)`);
         setVideo(videoData);
         setLoading(false);
       } catch (err) {
@@ -387,10 +419,13 @@ function ShortUrlRedirect() {
           margin-left: 8px !important;
           order: 6 !important;
         }
-        /* Hide captions button completely */
+        /* Show captions button when captions are available */
         .video-js .vjs-subs-caps-button {
-          display: none !important;
-          visibility: hidden !important;
+          display: flex !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          order: 6 !important;
+          margin-left: 8px !important;
         }
         /* Ensure big play button works */
         .video-js .vjs-big-play-button {
@@ -494,7 +529,7 @@ function ShortUrlRedirect() {
                     </div>
                   </div>
                 }>
-                  <VideoPlayer 
+                  <SimpleVideoPlayer 
                     src={streamingUrl} 
                     captions={video.captions || []} 
                     autoplay={true}

@@ -59,6 +59,22 @@ app.use('/qr-codes', express.static(path.join(__dirname, '../qr-codes')));
 app.use('/thumbnails', express.static(path.join(__dirname, '../video-storage/thumbnails')));
 // Serve uploaded videos from backend/upload folder
 app.use('/upload', express.static(path.join(__dirname, 'upload')));
+// Serve subtitles folder (for generated subtitles)
+app.use('/subtitles', express.static(path.join(__dirname, '../subtitles'), {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.vtt')) {
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+  }
+}));
+// Serve captions with proper CORS headers
+app.use('/video-storage/captions', express.static(path.join(__dirname, '../video-storage/captions'), {
+  setHeaders: (res, path) => {
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+}));
 
 // Log all API requests
 app.use('/api', (req, res, next) => {
@@ -88,6 +104,24 @@ app.use('/', redirectRoutes);
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Root route handler
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Video Streaming API Server',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      videos: '/api/videos',
+      captions: '/api/captions',
+      admin: '/api/admin',
+      users: '/api/users',
+      streaming: '/api/s/:slug'
+    },
+    documentation: 'This is a backend API server. Use the frontend application or API endpoints.'
+  });
 });
 
 // Error handling middleware
@@ -159,13 +193,27 @@ const PORT = config.port;
 // Test database connection before starting server
 testDatabaseConnection().then((connected) => {
   if (connected) {
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log('\n' + '='.repeat(50));
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       console.log(`📁 Video storage: ${config.upload.uploadPath}`);
       console.log(`🌐 Frontend URL: ${config.urls.frontend}`);
       console.log(`📦 CDN Mode: ${config.cdn.useCdn ? 'Enabled' : 'Disabled'}`);
       console.log('='.repeat(50) + '\n');
+    });
+
+    // Handle port already in use error
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`\n❌ Port ${PORT} is already in use!`);
+        console.error(`\n💡 Solution: Kill the process using port ${PORT}`);
+        console.error(`   Run: npm run kill-port`);
+        console.error(`   Or manually: netstat -ano | findstr :${PORT}`);
+        console.error(`   Then: taskkill /PID <PID> /F\n`);
+        process.exit(1);
+      } else {
+        throw error;
+      }
     });
   } else {
     console.error('\n⚠️  Server not started due to database connection failure.');

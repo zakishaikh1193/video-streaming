@@ -135,6 +135,8 @@ router.get('/export-filtered-csv', (req, res, next) => {
   next();
 }, authenticateToken, videoController.generateFilteredVideosCSV);
 
+router.get('/export-html-embeds', authenticateToken, videoController.generateHTMLEmbeds);
+
 // Deleted videos route - MUST be before any /:id or /:videoId routes
 router.get('/deleted', (req, res, next) => {
   console.log('[Route] ===== /deleted route hit =====');

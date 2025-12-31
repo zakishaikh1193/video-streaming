@@ -1532,7 +1532,8 @@ export async function getVideoMetadataDiagnostic(req, res) {
     
     // Check 5: Controller Layer Processing (via getAllVideos)
     try {
-      const allVideos = await videoService.getAllVideos({});
+      const result = await videoService.getAllVideos({});
+      const allVideos = result.videos || [];
       const controllerVideo = allVideos.find(v => 
         v.id === videoRecord.id || v.video_id === videoRecord.video_id
       );
@@ -2758,7 +2759,10 @@ export async function incrementVideoViews(req, res) {
 export async function generateVideosCSV(req, res) {
   try {
     // Get all active videos
-    const videos = await videoService.getAllVideos({ status: 'active' });
+    const result = await videoService.getAllVideos({ status: 'active' });
+    
+    // Extract videos array from result (getAllVideos returns { videos: [], pagination: {} })
+    const videos = result.videos || [];
     
     if (videos.length === 0) {
       return res.status(400).json({ error: 'No videos found to generate CSV' });
